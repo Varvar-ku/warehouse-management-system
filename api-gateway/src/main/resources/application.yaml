@@ -1,0 +1,50 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            # Маршруты на этапе 2. Остальные сервисы добавляются по мере появления
+            - id: auth-service
+              uri: ${AUTH_SERVICE_URL:http://localhost:8081}
+              predicates:
+                # /** совпадает и с самим путём (/api/v1/me), и со всем, что глубже
+                - Path=/api/v1/auth/**,/api/v1/me/**,/api/v1/users/**,/api/v1/roles/**
+            - id: catalog-service
+              uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/v1/products/**,/api/v1/product-types/**,/api/v1/units/**,/api/v1/attribute-definitions/**
+            - id: warehouse-service
+              uri: ${WAREHOUSE_SERVICE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/v1/warehouses/**,/api/v1/sections/**,/api/v1/placement-rules/**,/api/v1/placement/**
+            - id: inventory-service
+              uri: ${INVENTORY_SERVICE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/v1/receipts/**,/api/v1/placement-tasks/**,/api/v1/stock/**,/api/v1/reservations/**,/api/v1/issues/**,/api/v1/write-offs/**
+            # Далее (этапы 3–7):
+            #   /api/v1/warehouses/**, /api/v1/sections/**, /api/v1/placement-rules/** → warehouse-service :8083
+            #   /api/v1/stock/**, /api/v1/receipts/**, /api/v1/issues/**, /api/v1/write-offs/** → inventory-service :8084
+            #   /api/v1/requests/** → request-service :8085;  /api/v1/picking-tasks/** → picking-service :8086
+
+app:
+  security:
+    public-paths:
+      - /api/v1/auth/login
+    jwt:
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+      issuer: warehouse-auth
+  cors:
+    # Адреса фронтенда (React dev-сервер). Через запятую.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

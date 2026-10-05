@@ -1,0 +1,40 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: catalog-service
+  datasource:
+    # Значения по умолчанию подходят для локального docker-compose.
+    # В других средах переопределяются переменными окружения.
+    url: ${CATALOG_DB_URL:jdbc:postgresql://localhost:5433/catalog_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD:warehouse}
+  jpa:
+    open-in-view: false          # запросы к БД только внутри сервисного слоя
+    hibernate:
+      ddl-auto: validate         # схему меняет ТОЛЬКО Flyway, Hibernate лишь проверяет соответствие
+    properties:
+      hibernate:
+        default_batch_fetch_size: 50   # убирает N+1 при загрузке атрибутов списка товаров
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized   # не раскрываем детали посторонним
+
+app:
+  security:
+    jwt:
+      # Секрет должен совпадать во всех сервисах и в gateway
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+      issuer: warehouse-auth

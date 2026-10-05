@@ -1,0 +1,51 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: warehouse-service
+  datasource:
+    url: ${WAREHOUSE_DB_URL:jdbc:postgresql://localhost:5433/warehouse_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD:warehouse}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_batch_fetch_size: 50   # допустимые типы/материалы секций грузятся пачками
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    deserialization:
+      # Строгий режим: опечатка в имени поля (например, "materal" в условиях правила) иначе молча
+      # игнорировалась бы, и правило подошло бы слишком широко. Теперь такой запрос получит 400.
+      fail-on-unknown-properties: true
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+      issuer: warehouse-auth
+
+warehouse:
+  placement:
+    length-tolerance: 0.5      # допустимая погрешность сравнения размеров, в мм
+    default-length-unit: MM    # единица, если у значения она не указана
+    length-units:              # единица → коэффициент перевода в мм
+      MM: 1
+      CM: 10
+      M: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized

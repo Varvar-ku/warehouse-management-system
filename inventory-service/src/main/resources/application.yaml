@@ -1,0 +1,49 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: inventory-service
+  datasource:
+    url: ${INVENTORY_DB_URL:jdbc:postgresql://localhost:5433/inventory_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD:warehouse}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_batch_fetch_size: 50
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true   # опечатки в именах полей запроса дают 400, а не молча игнорируются
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+      issuer: warehouse-auth
+  services:
+    catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
+    warehouse-url: ${WAREHOUSE_SERVICE_URL:http://localhost:8083}
+  write-off:
+    comment-required-reasons: [ LOST, OTHER ]   # причины, для которых комментарий обязателен
+    approval-reasons: [ LOST ]                  # причины, для которых нужно подтверждение администратора
+  idempotency:
+    in-progress-timeout: 2m                   # «зависший» запрос старше этого срока можно перехватить
+    retention: 48h                            # сколько хранить ключи
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
