@@ -9,6 +9,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import ru.warehouse.common.security.JwtKeys;
 import ru.warehouse.common.security.JwtProperties;
+import org.springframework.core.env.Environment;
 
 @Configuration
 public class AuthConfig {
@@ -18,10 +19,8 @@ public class AuthConfig {
     PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
-
-    /** Подпись токенов тем же секретом, которым другие сервисы их проверяют. */
     @Bean
-    JwtEncoder jwtEncoder(JwtProperties props) {
-        return new NimbusJwtEncoder(new ImmutableSecret<>(JwtKeys.secretKey(props)));
+    JwtEncoder jwtEncoder(JwtProperties props, Environment env) {
+        return new NimbusJwtEncoder(new ImmutableSecret<>(JwtKeys.secretKey(props, env)));
     }
 }

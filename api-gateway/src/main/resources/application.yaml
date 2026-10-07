@@ -37,8 +37,7 @@ app:
     public-paths:
       - /api/v1/auth/login
     jwt:
-      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
-      issuer: warehouse-auth
+      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен      issuer: warehouse-auth
   cors:
     # Адреса фронтенда (React dev-сервер). Через запятую.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}

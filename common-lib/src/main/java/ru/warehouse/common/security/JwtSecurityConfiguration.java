@@ -18,6 +18,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.core.env.Environment;
 
 /**
  * Защита сервиса: все запросы требуют валидный JWT, кроме health и путей из app.security.public-paths.
@@ -30,9 +31,9 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 public class JwtSecurityConfiguration {
 
     @Bean
-    JwtDecoder jwtDecoder(JwtProperties props) {
+    JwtDecoder jwtDecoder(JwtProperties props, Environment env) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder
-                .withSecretKey(JwtKeys.secretKey(props))
+                .withSecretKey(JwtKeys.secretKey(props, env))
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
         // Кроме подписи и срока действия проверяем издателя токена

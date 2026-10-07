@@ -29,8 +29,7 @@ spring:
 app:
   security:
     jwt:
-      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
-      issuer: warehouse-auth
+      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен      issuer: warehouse-auth
 
 warehouse:
   placement:

@@ -36,5 +36,4 @@ app:
   security:
     jwt:
       # Секрет должен совпадать во всех сервисах и в gateway
-      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
-      issuer: warehouse-auth
+      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен      issuer: warehouse-auth

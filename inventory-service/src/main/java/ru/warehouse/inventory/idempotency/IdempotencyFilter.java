@@ -24,8 +24,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.HexFormat;
 import java.util.Set;
 import java.util.UUID;
@@ -94,13 +92,16 @@ class IdempotencyFilter extends OncePerRequestFilter implements Ordered {
         }
         String fingerprint = fingerprint(request, body);
 
-        if (!store.claim(userId, key, fingerprint)) {
+        UUID owner = UUID.randomUUID(); // токен этой попытки
+        if (!store.claim(userId, key, fingerprint, owner)) {
             var existing = store.find(userId, key).orElse(null);
-            if (existing == null && !store.claim(userId, key, fingerprint)) {
-                error(response, 409, "REQUEST_IN_PROGRESS", "Запрос с этим ключом ещё выполняется");
-                return;
-            }
-            if (existing != null) {
+            if (existing == null) {
+                // запись исчезла между claim и find: одна повторная попытка занять ключ
+                if (!store.claim(userId, key, fingerprint, owner)) {
+                    error(response, 409, "REQUEST_IN_PROGRESS", "Запрос с этим ключом ещё выполняется");
+                    return;
+                }
+            } else {
                 if (!existing.fingerprint().equals(fingerprint)) {
                     error(response, 422, "IDEMPOTENCY_KEY_REUSED", "Этот Idempotency-Key уже использован для другого запроса");
                     return;
@@ -109,8 +110,8 @@ class IdempotencyFilter extends OncePerRequestFilter implements Ordered {
                     replay(response, existing.responseStatus(), existing.responseBody());
                     return;
                 }
-                // IN_PROGRESS: ждём, а если запрос «завис» дольше таймаута, перехватываем ключ
-                if (!store.takeOver(userId, key, props.inProgressTimeout())) {
+                // IN_PROGRESS: ждём; если запрос «завис» дольше таймаута, перехватываем ключ (владельцем станем мы)
+                if (!store.takeOver(userId, key, props.inProgressTimeout(), owner)) {
                     error(response, 409, "REQUEST_IN_PROGRESS", "Запрос с этим ключом ещё выполняется");
                     return;
                 }
@@ -118,16 +119,18 @@ class IdempotencyFilter extends OncePerRequestFilter implements Ordered {
         }
 
         ContentCachingResponseWrapper wrapped = new ContentCachingResponseWrapper(response);
-        boolean stored = false;
+        boolean finished = false;
         try {
             chain.doFilter(new CachedBodyRequest(request, body), wrapped);
             int status = wrapped.getStatus();
             if (status >= 200 && status < 300) {
-                store.complete(userId, key, status, new String(wrapped.getContentAsByteArray(), StandardCharsets.UTF_8));
-                stored = true;
+                // false означает, что ключ перехвачен другим запросом: ничего не сохраняем и ничего не удаляем
+                store.complete(userId, key, owner, status,
+                        new String(wrapped.getContentAsByteArray(), StandardCharsets.UTF_8));
+                finished = true;
             }
         } finally {
-            if (!stored) store.release(userId, key); // ошибка или не-2xx: клиент вправе повторить с тем же ключом
+            if (!finished) store.release(userId, key, owner); // ошибка или не-2xx: освобождаем ТОЛЬКО свою запись
             wrapped.copyBodyToResponse();
         }
     }
