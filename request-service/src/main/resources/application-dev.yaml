@@ -1,0 +1,4 @@
+app:
+  security:
+    jwt:
+      secret: dev-only-secret-change-me-0123456789abcdef

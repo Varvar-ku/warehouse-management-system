@@ -1,3 +1,5 @@
+Подключение скриптов в терминал: . .\scripts\api.ps1
+
 POSTGRES_PASSWORD: warehouse  //контейнер PostgreSQL + только для локальной разработки
 
 api-gateway\application.yaml:40:      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}

@@ -27,6 +27,10 @@ spring:
               uri: ${INVENTORY_SERVICE_URL:http://localhost:8084}
               predicates:
                 - Path=/api/v1/receipts/**,/api/v1/placement-tasks/**,/api/v1/stock/**,/api/v1/reservations/**,/api/v1/issues/**,/api/v1/write-offs/**
+            - id: request-service
+              uri: ${REQUEST_SERVICE_URL:http://localhost:8085}
+              predicates:
+                - Path=/api/v1/requests/**
             # Далее (этапы 3–7):
             #   /api/v1/warehouses/**, /api/v1/sections/**, /api/v1/placement-rules/** → warehouse-service :8083
             #   /api/v1/stock/**, /api/v1/receipts/**, /api/v1/issues/**, /api/v1/write-offs/** → inventory-service :8084

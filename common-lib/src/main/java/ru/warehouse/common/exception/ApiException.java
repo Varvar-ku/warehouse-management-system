@@ -44,4 +44,9 @@ public class ApiException extends RuntimeException {
     public static ApiException upstream(String message) {
         return new ApiException(HttpStatus.BAD_GATEWAY, "UPSTREAM_ERROR", message, List.of());
     }
+
+    /** Ошибка соседнего сервиса, переданная пользователю с тем же статусом, кодом и пояснениями. */
+    public static ApiException passthrough(HttpStatus status, String code, String message, List<String> details) {
+        return new ApiException(status, code, message, details == null ? List.of() : details);
+    }
 }

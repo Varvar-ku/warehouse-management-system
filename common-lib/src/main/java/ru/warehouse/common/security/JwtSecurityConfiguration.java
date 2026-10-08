@@ -71,6 +71,7 @@ public class JwtSecurityConfiguration {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+                    auth.requestMatchers("/error").permitAll(); // иначе ошибки контейнера превращаются в 401
                     if (publicPaths.length > 0) {
                         auth.requestMatchers(publicPaths).permitAll();
                     }

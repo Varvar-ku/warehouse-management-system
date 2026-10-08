@@ -1,0 +1,44 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: request-service
+  datasource:
+    url: ${REQUEST_DB_URL:jdbc:postgresql://localhost:5433/request_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD:warehouse}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        default_batch_fetch_size: 50
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true   # опечатки в именах полей запроса дают 400
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}             # без значения по умолчанию; для разработки включите профиль dev
+      issuer: warehouse-auth
+  services:
+    catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
+    warehouse-url: ${WAREHOUSE_SERVICE_URL:http://localhost:8083}
+    inventory-url: ${INVENTORY_SERVICE_URL:http://localhost:8084}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
