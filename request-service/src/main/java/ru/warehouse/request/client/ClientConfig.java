@@ -11,4 +11,5 @@ class ClientConfig {
     @Bean RestClient catalogRestClient(ServicesProperties p) { return ServiceRestClients.create(p.catalogUrl()); }
     @Bean RestClient warehouseRestClient(ServicesProperties p) { return ServiceRestClients.create(p.warehouseUrl()); }
     @Bean RestClient inventoryRestClient(ServicesProperties p) { return ServiceRestClients.create(p.inventoryUrl()); }
+    @Bean RestClient authRestClient(ServicesProperties p) { return ServiceRestClients.create(p.authUrl()); }
 }

@@ -37,4 +37,7 @@ public final class AuthDtos {
     public record ResetPasswordRequest(@NotBlank String newPassword) {}
 
     public record RoleResponse(String code, String name) {}
+
+    /** Краткие данные работника склада для назначений. */
+    public record WorkerInfo(UUID id, String login, String fullName) {}
 }

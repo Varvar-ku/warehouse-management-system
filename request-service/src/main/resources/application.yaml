@@ -33,6 +33,7 @@ app:
     catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
     warehouse-url: ${WAREHOUSE_SERVICE_URL:http://localhost:8083}
     inventory-url: ${INVENTORY_SERVICE_URL:http://localhost:8084}
+    auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
 
 management:
   endpoints:

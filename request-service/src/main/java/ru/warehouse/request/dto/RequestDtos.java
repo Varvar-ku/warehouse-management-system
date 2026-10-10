@@ -50,7 +50,8 @@ public final class RequestDtos {
     public record RequestResponse(
             UUID id, String number, UUID requesterId, UUID warehouseId, RequestStatus status, int priority,
             String comment, String statusReason, OffsetDateTime createdAt, OffsetDateTime submittedAt,
-            UUID reviewedBy, OffsetDateTime reviewedAt, OffsetDateTime closedAt, List<RequestItemResponse> items) {}
+            UUID reviewedBy, OffsetDateTime reviewedAt, OffsetDateTime closedAt, String issueNumber,
+            List<RequestItemResponse> items) {}
 
     public record RequestSummary(UUID id, String number, UUID requesterId, UUID warehouseId, RequestStatus status,
                                  int priority, OffsetDateTime createdAt, OffsetDateTime submittedAt, int itemsCount) {}

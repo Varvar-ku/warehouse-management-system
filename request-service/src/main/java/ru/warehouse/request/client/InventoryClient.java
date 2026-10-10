@@ -11,6 +11,7 @@ import ru.warehouse.common.exception.ApiException;
 import ru.warehouse.request.client.InventoryContract.*;
 import java.util.List;
 import java.util.UUID;
+import ru.warehouse.common.dto.PageResponse;
 
 /** Вызовы inventory-service с JWT пользователя (нужна роль STOREKEEPER). */
 @Component
@@ -64,5 +65,36 @@ public class InventoryClient {
                 .retrieve()
                 .body(new ParameterizedTypeReference<List<ReservationDto>>() {}));
         return result == null ? List.of() : result;
+    }
+
+    public IssueDto createIssue(CreateIssueRequest request) {
+        IssueDto result = Remote.call(SERVICE, () -> client.post()
+                .uri("/api/v1/issues")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(IssueDto.class));
+        if (result == null) throw ApiException.upstream("inventory-service вернул пустой ответ");
+        return result;
+    }
+
+    /** Ключ зависит от документа: повторное подтверждение вернёт сохранённый ответ, а не вторую выдачу. */
+    public IssueDto confirmIssue(UUID issueId) {
+        IssueDto result = Remote.call(SERVICE, () -> client.post()
+                .uri("/api/v1/issues/{id}/confirm", issueId)
+                .header("Idempotency-Key", "iss-" + issueId)
+                .retrieve()
+                .body(IssueDto.class));
+        if (result == null) throw ApiException.upstream("inventory-service вернул пустой ответ");
+        return result;
+    }
+
+    /** Документы передачи по заявке (все статусы): нужны для восстановления после сбоя. */
+    public List<IssueDto> issues(UUID requestId) {
+        PageResponse<IssueDto> page = Remote.call(SERVICE, () -> client.get()
+                .uri("/api/v1/issues?requestId={id}&size=100", requestId)
+                .retrieve()
+                .body(new ParameterizedTypeReference<PageResponse<IssueDto>>() {}));
+        return page == null || page.content() == null ? List.of() : page.content();
     }
 }

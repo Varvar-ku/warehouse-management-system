@@ -14,6 +14,8 @@ import ru.warehouse.request.service.Actor;
 import ru.warehouse.request.service.RequestService;
 import java.util.List;
 import java.util.UUID;
+import ru.warehouse.request.dto.PickingDtos.*;
+import ru.warehouse.request.service.IssuingService;
 
 /**
  * Заявки. USER работает со своими заявками, STOREKEEPER обрабатывает все (разд. 4 ТЗ).
@@ -33,7 +35,7 @@ public class RequestController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('USER', 'STOREKEEPER')")
+    @PreAuthorize("hasAnyRole('USER', 'STOREKEEPER', 'ADMIN')")
     public PageResponse<RequestSummary> search(@RequestParam(required = false) RequestStatus status,
                                                @RequestParam(required = false) UUID warehouseId,
                                                @RequestParam(required = false) UUID requesterId,
@@ -45,13 +47,13 @@ public class RequestController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('USER', 'STOREKEEPER')")
+    @PreAuthorize("hasAnyRole('USER', 'STOREKEEPER', 'ADMIN')")
     public RequestResponse get(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
         return requestService.get(id, actor(jwt));
     }
 
     @GetMapping("/{id}/history")
-    @PreAuthorize("hasAnyRole('USER', 'STOREKEEPER')")
+    @PreAuthorize("hasAnyRole('USER', 'STOREKEEPER', 'ADMIN')")
     public List<HistoryResponse> history(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
         return requestService.history(id, actor(jwt));
     }
@@ -111,6 +113,22 @@ public class RequestController {
 
     private static Actor actor(Jwt jwt) {
         List<String> roles = jwt.getClaimAsStringList("roles");
-        return new Actor(UUID.fromString(jwt.getSubject()), roles != null && roles.contains("STOREKEEPER"));
+        boolean storekeeper = roles != null && roles.contains("STOREKEEPER");
+        boolean admin = roles != null && roles.contains("ADMIN");
+        return new Actor(UUID.fromString(jwt.getSubject()), storekeeper, admin);
+    }
+
+    @PostMapping("/{id}/ready-for-issue")
+    @PreAuthorize("hasRole('STOREKEEPER')")
+    public RequestResponse readyForIssue(@PathVariable UUID id, @Valid @RequestBody(required = false) ReadyDto dto,
+                                         @AuthenticationPrincipal Jwt jwt) {
+        return requestService.readyForIssue(id, dto == null ? null : dto.comment(), actor(jwt));
+    }
+
+    @PostMapping("/{id}/issue")
+    @PreAuthorize("hasRole('STOREKEEPER')")
+    public RequestResponse issue(@PathVariable UUID id, @Valid @RequestBody(required = false) IssueRequestDto dto,
+                                 @AuthenticationPrincipal Jwt jwt) {
+        return issuingService.issue(id, dto, actor(jwt));
     }
 }

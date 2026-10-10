@@ -31,6 +31,8 @@ import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import ru.warehouse.request.entity.PickingTask;
+import ru.warehouse.request.repository.PickingTaskRepository;
 
 /** Жизненный цикл заявки до резервирования (разд. 5.4, 8 и 11 ТЗ). Комплектация и выдача: часть 5б. */
 @Slf4j
@@ -45,6 +47,7 @@ public class RequestService {
     private final CatalogClient catalogClient;
     private final WarehouseClient warehouseClient;
     private final InventoryClient inventoryClient;
+    private final PickingTaskRepository pickingTaskRepository;
 
     // ================= пользователь: черновик и отправка =================
 
@@ -223,7 +226,10 @@ public class RequestService {
             // Сначала освобождаем резерв: если inventory недоступен, статус не меняется и состояние остаётся согласованным
             inventoryClient.release(r.getId());
             r.getItems().forEach(i -> i.setReservedQuantity(BigDecimal.ZERO));
-            // TODO часть 5б: при PICKING отменить и задания на комплектацию
+            for (PickingTask t : pickingTaskRepository.findByRequestIdAndStatusIn(r.getId(),
+                    List.of(PickingTask.Status.NEW, PickingTask.Status.IN_PROGRESS))) {
+                t.reject(); // открытое задание отклоняется, его работники снимаются
+            }
         }
         transition(r, RequestStatus.CANCELLED, actor.userId(), reason.trim());
         r.setStatusReason(reason.trim());
@@ -260,7 +266,7 @@ public class RequestService {
         var pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
                 Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id")));
         Specification<Request> spec = (root, query, cb) -> cb.conjunction();
-        if (!actor.storekeeper()) {
+        if (!actor.seesAll()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("requesterId"), actor.userId()));
         } else if (requesterId != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("requesterId"), requesterId));
@@ -315,7 +321,7 @@ public class RequestService {
     }
 
     /** Единственное место смены статуса: проверка перехода и запись в историю. */
-    private void transition(Request r, RequestStatus to, UUID actorId, String comment) {
+    public void transition(Request r, RequestStatus to, UUID actorId, String comment) {
         RequestStatus from = r.getStatus();
         if (!from.canTransitionTo(to)) {
             throw ApiException.conflict("INVALID_TRANSITION", "Переход " + from + " → " + to + " не допускается");
@@ -348,7 +354,7 @@ public class RequestService {
     private Request findVisible(UUID id, Actor actor) {
         Request r = requestRepository.findById(id)
                 .orElseThrow(() -> ApiException.notFound("REQUEST_NOT_FOUND", "Заявка не найдена"));
-        if (!actor.storekeeper() && !r.getRequesterId().equals(actor.userId())) {
+        if (!actor.seesAll() && !r.getRequesterId().equals(actor.userId())) {
             throw ApiException.notFound("REQUEST_NOT_FOUND", "Заявка не найдена");
         }
         return r;
@@ -403,5 +409,14 @@ public class RequestService {
 
     private static String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s.trim();
+    }
+
+    /** Кладовщик проверил результаты комплектации и готов оформить выдачу (разд. 13 ТЗ). */
+    @Transactional
+    public RequestResponse readyForIssue(UUID id, String comment, Actor actor) {
+        Request r = lockAny(id);
+        transition(r, RequestStatus.READY_FOR_ISSUE, actor.userId(), blankToNull(comment));
+        log.info("AUDIT: заявка {} готова к выдаче, кладовщик {}", r.getNumber(), actor.userId());
+        return RequestMapper.toResponse(r);
     }
 }

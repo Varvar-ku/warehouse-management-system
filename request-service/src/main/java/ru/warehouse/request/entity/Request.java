@@ -50,6 +50,9 @@ public class Request {
         updatedAt = createdAt;
     }
 
+    @Column(name = "issue_id") private UUID issueId;
+    @Column(name = "issue_number", length = 50) private String issueNumber;
+
     public void touch() {
         updatedAt = OffsetDateTime.now();
     }

@@ -13,7 +13,7 @@ final class RequestMapper {
     static RequestResponse toResponse(Request r) {
         return new RequestResponse(r.getId(), r.getNumber(), r.getRequesterId(), r.getWarehouseId(), r.getStatus(),
                 r.getPriority(), r.getComment(), r.getStatusReason(), r.getCreatedAt(), r.getSubmittedAt(),
-                r.getReviewedBy(), r.getReviewedAt(), r.getClosedAt(),
+                r.getReviewedBy(), r.getReviewedAt(), r.getClosedAt(), r.getIssueNumber(),
                 r.getItems().stream().map(RequestMapper::toItem).toList());
     }
 

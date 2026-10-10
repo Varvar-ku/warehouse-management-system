@@ -15,6 +15,7 @@ spring:
               predicates:
                 # /** совпадает и с самим путём (/api/v1/me), и со всем, что глубже
                 - Path=/api/v1/auth/**,/api/v1/me/**,/api/v1/users/**,/api/v1/roles/**
+                - Path=/api/v1/auth/**,/api/v1/me/**,/api/v1/users/**,/api/v1/roles/**,/api/v1/directory/**
             - id: catalog-service
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
               predicates:
@@ -31,6 +32,7 @@ spring:
               uri: ${REQUEST_SERVICE_URL:http://localhost:8085}
               predicates:
                 - Path=/api/v1/requests/**
+                - Path=/api/v1/requests/**,/api/v1/picking-tasks/**
             # Далее (этапы 3–7):
             #   /api/v1/warehouses/**, /api/v1/sections/**, /api/v1/placement-rules/** → warehouse-service :8083
             #   /api/v1/stock/**, /api/v1/receipts/**, /api/v1/issues/**, /api/v1/write-offs/** → inventory-service :8084

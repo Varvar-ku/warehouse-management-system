@@ -53,11 +53,11 @@ public final class OperationDtos {
 
     public record ReleaseResponse(UUID requestId, int releasedReservations, BigDecimal releasedQuantity) {}
 
-    public record ReservationResponse(UUID id, UUID requestId, UUID requestItemId, UUID stockId, String sectionCode,
+    public record ReservationResponse(UUID id, UUID requestId, UUID requestItemId, UUID stockId,
+                                      UUID sectionId, String sectionCode, UUID batchId, String batchNumber,
                                       String productSku, BigDecimal quantity, BigDecimal consumedQuantity,
                                       BigDecimal releasedQuantity, Reservation.Status status,
                                       OffsetDateTime createdAt, OffsetDateTime closedAt) {}
-
     // ================= выдача =================
 
     public record IssueItemRequest(

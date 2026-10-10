@@ -188,4 +188,10 @@ public class UserService {
             throw ApiException.validation("Пароль слишком длинный (не более " + MAX_PASSWORD_BYTES + " байт)");
         }
     }
+
+    @Transactional(readOnly = true)
+    public List<WorkerInfo> activeWorkers() {
+        return userRepository.findActiveByRoleCode("WAREHOUSE_WORKER").stream()
+                .map(u -> new WorkerInfo(u.getId(), u.getLogin(), u.getFullName())).toList();
+    }
 }
