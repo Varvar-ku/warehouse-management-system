@@ -1,5 +1,6 @@
 server:
   port: 8081
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -7,7 +8,7 @@ spring:
   datasource:
     url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5433/auth_db}
     username: ${DB_USER:warehouse}
-    password: ${DB_PASSWORD:warehouse}
+    password: ${DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -20,25 +21,49 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        max.block.ms: 5000
 
 app:
   security:
     public-paths:
       - /api/v1/auth/login
+    self-service-password-change: false   # пароли и логины задаёт только администратор
     jwt:
-      secret: ${JWT_SECRET:}                    # было: ${JWT_SECRET:dev-only-secret-...}
+      secret: ${JWT_SECRET:}                    # без значения по умолчанию: секрет обязателен
       issuer: warehouse-auth
       ttl: 8h
+    login-throttle:
+      enabled: true
+      pair-max-failures: 5      # неудач подряд для пары логин + IP до блокировки
+      pair-base-lock: 30s       # первая пауза, дальше удваивается
+      ip-max-failures: 30       # неудач с одного IP (любые логины)
+      ip-base-lock: 60s
+      max-lock: 15m             # потолок паузы
+      reset-after: 15m          # без неудач столько времени, и счётчик обнуляется
   bootstrap-admin:
     login: ${BOOTSTRAP_ADMIN_LOGIN:admin}
-    password: ${BOOTSTRAP_ADMIN_PASSWORD:}      # было: ${BOOTSTRAP_ADMIN_PASSWORD:Admin-2026-dev}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}      # без значения по умолчанию
     full-name: Администратор системы
+
+wms:
+  outbox:
+    enabled: true     # события аудита уходят в Kafka через outbox
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info   # metrics убраны: их никто не читает (при мониторинге вернуть и оставить доступ только ADMIN)
   endpoint:
     health:
       show-details: when-authorized

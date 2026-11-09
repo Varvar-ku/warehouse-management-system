@@ -1,6 +1,9 @@
+spring:
+  datasource:
+    password: ${DB_PASSWORD:warehouse}
 app:
   security:
     jwt:
-      secret: dev-only-secret-change-me-0123456789abcdef
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
   bootstrap-admin:
-    password: Admin-2026-dev
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:Admin-2026-dev}

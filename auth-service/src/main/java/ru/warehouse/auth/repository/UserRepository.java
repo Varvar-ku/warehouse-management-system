@@ -26,6 +26,14 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query("select count(u) from User u join u.roles r where r.code = 'ADMIN' and u.active = true")
     long countActiveAdmins();
 
+    /**
+     * M6: сериализует изменения, способные лишить систему администратора. Транзакционная advisory-блокировка PostgreSQL
+     * снимается при завершении транзакции; без неё два администратора, отключающие друг друга одновременно,
+     * оба проходят проверку «последнего администратора».
+     */
+    @Query(value = "select 1 from (select pg_advisory_xact_lock(7340001)) as l", nativeQuery = true)
+    Integer lockAdminChanges();
+
     @Query("select u from User u join u.roles r where r.code = :code and u.active = true order by u.fullName")
     List<User> findActiveByRoleCode(@Param("code") String code);
 }

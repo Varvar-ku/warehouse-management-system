@@ -15,6 +15,8 @@ public final class AuthDtos {
 
     public record UserResponse(UUID id, String login, String fullName, String email, String phone,
                                boolean active, List<String> roles, OffsetDateTime createdAt) {}
+    /** Краткие данные пользователя для отчётов и интерфейса (без почты и телефона). */
+    public record UserInfo(UUID id, String login, String fullName, boolean active) {}
 
     public record CreateUserRequest(
             @NotBlank @Pattern(regexp = "^[A-Za-z0-9._@-]{3,100}$", message = "3–100 символов: латиница, цифры, . _ @ -") String login,

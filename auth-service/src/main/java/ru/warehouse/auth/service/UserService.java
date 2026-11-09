@@ -29,6 +29,11 @@ public class UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuthAudit audit;
+
+    /** Запрещённые сочетания ролей (разделение обязанностей), формат «РОЛЬ+РОЛЬ». Задаётся app.security.forbidden-role-combinations. */
+    @org.springframework.beans.factory.annotation.Value("${app.security.forbidden-role-combinations:USER+STOREKEEPER,STOREKEEPER+ADMIN}")
+    private List<String> forbiddenRoleCombinations;
 
     @Transactional
     public UserResponse create(CreateUserRequest req, UUID actorId) {
@@ -46,7 +51,7 @@ public class UserService {
         user.setPhone(blankToNull(req.phone()));
         user.setRoles(resolveRoles(req.roles()));
         user = userRepository.save(user);
-        log.info("Создан пользователь {} ({}), инициатор {}", user.getLogin(), user.getId(), actorId);
+        audit.record("user.created", "USER", user.getId(), actorId, "login", user.getLogin(), "roles", roleCodes(user));
         return toResponse(user);
     }
 
@@ -63,11 +68,16 @@ public class UserService {
 
     @Transactional
     public UserResponse update(UUID id, UpdateUserRequest req, UUID actorId) {
+        // M6: блокировка берётся ДО чтения пользователя и подсчёта администраторов: иначе параллельное изменение
+        // другого администратора осталось бы незамеченным (оба видят «двое активных»)
+        userRepository.lockAdminChanges();
         User user = find(id);
 
         // Считаем администраторов ДО изменений (иначе автосброс контекста исказит подсчёт)
         boolean wasActiveAdmin = user.isActive() && hasAdminRole(user);
         long activeAdmins = wasActiveAdmin ? userRepository.countActiveAdmins() : 0;
+        boolean activeBefore = user.isActive();
+        List<String> rolesBefore = roleCodes(user);
 
         if (req.fullName() != null) user.setFullName(req.fullName().trim());
         if (req.email() != null) user.setEmail(blankToNull(req.email()));
@@ -86,8 +96,29 @@ public class UserService {
             throw ApiException.conflict("LAST_ADMIN", "Нельзя отключить или лишить роли последнего администратора");
         }
         user.touch();
-        log.info("Изменён пользователь {} ({}), инициатор {}", user.getLogin(), user.getId(), actorId);
+        List<String> changed = new ArrayList<>();
+        if (req.fullName() != null) changed.add("fullName");
+        if (req.email() != null) changed.add("email");
+        if (req.phone() != null) changed.add("phone");
+        audit.record("user.updated", "USER", user.getId(), actorId, "login", user.getLogin(),
+                "changedFields", changed, "activeBefore", activeBefore, "activeAfter", user.isActive(),
+                "rolesBefore", rolesBefore, "rolesAfter", roleCodes(user));
         return toResponse(user);
+    }
+
+    /**
+     * S6: активные пользователи, у которых уже назначено запрещённое сочетание ролей (проверка при создании и
+     * изменении ролей не затрагивает записи, созданные до её появления). Только для предупреждения в логе при запуске.
+     */
+    @Transactional(readOnly = true)
+    public List<String> loginsWithForbiddenRoleCombinations() {
+        List<String> result = new ArrayList<>();
+        for (User u : userRepository.findAll()) {
+            if (u.isActive() && RoleCombinations.violation(roleCodes(u), forbiddenRoleCombinations) != null) {
+                result.add(u.getLogin() + " " + roleCodes(u));
+            }
+        }
+        return result;
     }
 
     @Transactional
@@ -96,7 +127,7 @@ public class UserService {
         User user = find(id);
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.touch();
-        log.info("Сброшен пароль пользователя {} ({}), инициатор {}", user.getLogin(), user.getId(), actorId);
+        audit.record("user.password_reset", "USER", user.getId(), actorId, "login", user.getLogin());
     }
 
     @Transactional
@@ -108,7 +139,7 @@ public class UserService {
         validatePassword(req.newPassword());
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         user.touch();
-        log.info("Пользователь {} сменил пароль", user.getLogin());
+        audit.record("user.password_changed", "USER", user.getId(), userId, "login", user.getLogin());
     }
 
     /** Данные текущего пользователя для GET /me. Отключённый или удалённый, то есть 401. */
@@ -140,8 +171,9 @@ public class UserService {
         admin.setPasswordHash(passwordEncoder.encode(password));
         admin.setFullName(fullName == null || fullName.isBlank() ? "Администратор" : fullName);
         admin.setRoles(resolveRoles(Set.of("ADMIN")));
-        userRepository.save(admin);
-        log.warn("Создан администратор по умолчанию '{}'. СМЕНИТЕ ПАРОЛЬ (POST /api/v1/me/password)", admin.getLogin());
+        admin = userRepository.save(admin);
+        audit.record("user.bootstrap_admin_created", "USER", admin.getId(), null, "login", admin.getLogin());
+        log.warn("Создан администратор по умолчанию '{}'. СМЕНИТЕ ПАРОЛЬ (POST /api/v1/users/{id}/reset-password)", admin.getLogin());
     }
 
     // ================= вспомогательное =================
@@ -150,6 +182,10 @@ public class UserService {
         List<String> roles = u.getRoles().stream().map(Role::getCode).sorted().toList();
         return new UserResponse(u.getId(), u.getLogin(), u.getFullName(), u.getEmail(), u.getPhone(),
                 u.isActive(), roles, u.getCreatedAt());
+    }
+
+    private static List<String> roleCodes(User u) {
+        return u.getRoles().stream().map(Role::getCode).sorted().toList();
     }
 
     private User find(UUID id) {
@@ -168,6 +204,10 @@ public class UserService {
         if (found.size() != wanted.size()) {
             wanted.removeAll(found.stream().map(Role::getCode).collect(Collectors.toSet()));
             throw ApiException.validation("Неизвестные роли: " + wanted);
+        }
+        String violation = RoleCombinations.violation(wanted, forbiddenRoleCombinations);
+        if (violation != null) {
+            throw ApiException.conflict("ROLE_COMBINATION_FORBIDDEN", violation);
         }
         return new HashSet<>(found);
     }
@@ -193,5 +233,19 @@ public class UserService {
     public List<WorkerInfo> activeWorkers() {
         return userRepository.findActiveByRoleCode("WAREHOUSE_WORKER").stream()
                 .map(u -> new WorkerInfo(u.getId(), u.getLogin(), u.getFullName())).toList();
+    }
+
+    private static final int MAX_DIRECTORY_IDS = 200;
+
+    @Transactional(readOnly = true)
+    public List<UserInfo> directoryUsers(List<UUID> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return List.of();
+        }
+        if (ids.size() > MAX_DIRECTORY_IDS) {
+            throw ApiException.validation("Не более " + MAX_DIRECTORY_IDS + " идентификаторов за запрос");
+        }
+        return userRepository.findAllById(ids).stream()
+                .map(u -> new UserInfo(u.getId(), u.getLogin(), u.getFullName(), u.isActive())).toList();
     }
 }
