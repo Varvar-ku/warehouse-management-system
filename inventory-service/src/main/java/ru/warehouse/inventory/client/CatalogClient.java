@@ -5,6 +5,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import ru.warehouse.common.client.Remote;
 import ru.warehouse.inventory.client.CatalogContract.CatalogProduct;
 import java.util.Collection;
 import java.util.HashMap;

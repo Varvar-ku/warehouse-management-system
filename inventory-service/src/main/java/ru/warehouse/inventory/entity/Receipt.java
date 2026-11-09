@@ -4,6 +4,7 @@ package ru.warehouse.inventory.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,8 +40,16 @@ public class Receipt {
     @Column(nullable = false, length = 30)
     private Status status = Status.DRAFT;
 
+    /**
+     * Дата приёмки (M8): назначает сервер при создании и подтверждении, пользователь её не вводит. Она же становится датой
+     * поступления партии (по ней строится порядок FIFO), поэтому даты приёмки и поступления всегда совпадают.
+     */
     @Column(name = "received_at", nullable = false)
     private OffsetDateTime receivedAt;
+
+    /** Дата накладной поставщика: вводит пользователь, справочное поле, ни на что не влияет. */
+    @Column(name = "document_date")
+    private LocalDate documentDate;
 
     @Column(name = "created_by", nullable = false, updatable = false)
     private UUID createdBy;

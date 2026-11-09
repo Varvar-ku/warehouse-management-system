@@ -12,19 +12,24 @@ import ru.warehouse.common.dto.PageResponse;
 import ru.warehouse.inventory.dto.InventoryDtos.CancelRequest;
 import ru.warehouse.inventory.dto.OperationDtos.*;
 import ru.warehouse.inventory.entity.Issue;
+import ru.warehouse.inventory.security.RequestServiceOnly;
 import ru.warehouse.inventory.service.IssueService;
 import java.util.UUID;
 
-/** Документы передачи: оформляет кладовщик (разд. 4 ТЗ). POST /issues/{id}/confirm требует Idempotency-Key. */
+/**
+ * Документы передачи. Просмотр: кладовщик и request-service. Создание, подтверждение и отмена: только request-service
+ * со служебным токеном (выдача оформляется из заявки, P1-10). POST /issues/{id}/confirm требует Idempotency-Key.
+ */
 @RestController
 @RequestMapping("/api/v1/issues")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('STOREKEEPER')")
+@PreAuthorize("hasAnyRole('STOREKEEPER', 'SERVICE')")
 public class IssueController {
     private final IssueService issueService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @RequestServiceOnly
     public IssueResponse create(@Valid @RequestBody CreateIssueRequest request, @AuthenticationPrincipal Jwt jwt) {
         return issueService.create(request, user(jwt));
     }
@@ -43,11 +48,13 @@ public class IssueController {
     }
 
     @PostMapping("/{id}/confirm")
+    @RequestServiceOnly
     public IssueResponse confirm(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
         return issueService.confirm(id, user(jwt));
     }
 
     @PostMapping("/{id}/cancel")
+    @RequestServiceOnly
     public IssueResponse cancel(@PathVariable UUID id, @Valid @RequestBody CancelRequest request,
                                 @AuthenticationPrincipal Jwt jwt) {
         return issueService.cancel(id, request.reason(), user(jwt));

@@ -42,6 +42,16 @@ class IdempotencyStore {
                 newOwner, userId, key, (double) timeout.toSeconds()) == 1;
     }
 
+    /**
+     * «Сердцебиение»: пока запрос выполняется, продлеваем запись. created_at здесь служит отметкой последней
+     * активности (её же обновляет takeOver), поэтому схема таблицы не меняется.
+     */
+    boolean touch(UUID userId, String key, UUID owner) {
+        return jdbc.update("UPDATE idempotency_keys SET created_at = CURRENT_TIMESTAMP "
+                        + "WHERE user_id = ? AND idempotency_key = ? AND owner = ? AND status = 'IN_PROGRESS'",
+                userId, key, owner) == 1;
+    }
+
     /** Завершает запись только если мы всё ещё её владелец. false: ключ перехвачен, наш результат не сохраняем. */
     boolean complete(UUID userId, String key, UUID owner, int status, String body) {
         return jdbc.update("UPDATE idempotency_keys SET status = 'COMPLETED', response_status = ?, response_body = ?, "

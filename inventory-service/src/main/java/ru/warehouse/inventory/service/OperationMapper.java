@@ -35,8 +35,10 @@ final class OperationMapper {
 
     static ReservationResponse toResponse(Reservation r) {
         Stock s = r.getStock();
+        Batch b = s.getBatch();
         return new ReservationResponse(r.getId(), r.getRequestId(), r.getRequestItemId(), s.getId(),
-                s.getSectionCode(), s.getBatch().getProductSku(), r.getQuantity(), r.getConsumedQuantity(),
+                s.getSectionId(), s.getSectionCode(), b.getId(), b.getBatchNumber(),
+                b.getProductSku(), r.getQuantity(), r.getConsumedQuantity(),
                 r.getReleasedQuantity(), r.getStatus(), r.getCreatedAt(), r.getClosedAt());
     }
 }

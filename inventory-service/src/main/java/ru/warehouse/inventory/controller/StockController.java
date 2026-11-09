@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import ru.warehouse.common.dto.PageResponse;
 import ru.warehouse.inventory.dto.InventoryDtos.MovementResponse;
 import ru.warehouse.inventory.dto.InventoryDtos.StockResponse;
+import ru.warehouse.inventory.dto.SectionUsageResponse;
 import ru.warehouse.inventory.entity.StockMovement;
 import ru.warehouse.inventory.service.StockQueryService;
 import java.time.OffsetDateTime;
@@ -30,6 +31,12 @@ public class StockController {
                                              @RequestParam(defaultValue = "0") int page,
                                              @RequestParam(defaultValue = "20") int size) {
         return queryService.stock(warehouseId, sectionId, productId, onlyAvailable, includeZero, page, size);
+    }
+
+    /** Чем занята секция: остаток, резерв, незавершённые размещения. Использует warehouse-service. */
+    @GetMapping("/sections/{sectionId}/usage")
+    public SectionUsageResponse sectionUsage(@PathVariable UUID sectionId) {
+        return queryService.sectionUsage(sectionId);
     }
 
     @GetMapping("/movements")

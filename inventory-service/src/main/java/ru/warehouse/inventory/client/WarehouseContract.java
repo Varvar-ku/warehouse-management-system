@@ -32,6 +32,18 @@ public final class WarehouseContract {
 
     public record WarehouseInfo(UUID id, String code, String name, boolean active) {}
 
+    /** Ограничения секции из ответа GET /sections/{id} (поле constraints); здесь нужна только вместимость. */
+    public record SectionConstraints(BigDecimal maxCapacity, String capacityUnitCode) {}
+
     public record SectionInfo(UUID id, UUID warehouseId, String code, String name, String status,
-                              boolean unassignedZone) {}
+                              boolean unassignedZone, SectionConstraints constraints) {
+        public SectionInfo(UUID id, UUID warehouseId, String code, String name, String status, boolean unassignedZone) {
+            this(id, warehouseId, code, name, status, unassignedZone, null);
+        }
+    }
+
+    /** Подходит ли секция позиции (POST /placement/validate). Поля как в warehouse-service: лишнего быть не должно. */
+    public record ValidateRequest(UUID warehouseId, UUID sectionId, PlacementItem item) {}
+
+    public record SectionFit(boolean fits, String reason) {}
 }

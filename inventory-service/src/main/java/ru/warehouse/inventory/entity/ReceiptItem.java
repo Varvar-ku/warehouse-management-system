@@ -12,7 +12,7 @@ import java.util.UUID;
 @Table(name = "receipt_items")
 @Getter @Setter
 public class ReceiptItem {
-    public enum PlacementStatus { NEW, PENDING, PLACED, DISCREPANCY }
+    public enum PlacementStatus { NEW, PENDING, PLACED, DISCREPANCY, REJECTED }
     public enum TargetDecision { RECOMMENDED, ALTERNATIVE, UNASSIGNED_ZONE }
 
     @Id
@@ -80,6 +80,8 @@ public class ReceiptItem {
     @Column(name = "placed_quantity", precision = 18, scale = 4) private BigDecimal placedQuantity;
     @Column(name = "placed_by") private UUID placedBy;
     @Column(name = "placed_at") private OffsetDateTime placedAt;
+    @Column(name = "placed_unassigned_zone", nullable = false)
+    private boolean placedUnassignedZone;
     @Column(name = "discrepancy_comment") private String discrepancyComment;
     @Column(name = "batch_id") private UUID batchId;
 

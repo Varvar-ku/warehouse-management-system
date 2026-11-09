@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.warehouse.common.dto.PageResponse;
 import ru.warehouse.common.exception.ApiException;
+import ru.warehouse.common.numbering.DocumentNumbers;
+import ru.warehouse.common.validation.QuantityRules;
 import ru.warehouse.inventory.dto.OperationDtos.*;
 import ru.warehouse.inventory.entity.*;
 import ru.warehouse.inventory.repository.IssueRepository;
@@ -21,15 +23,23 @@ import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import ru.warehouse.common.event.OutboxPublisher;
+import static ru.warehouse.common.event.OutboxPublisher.details;
+
 /** Документы передачи (разд. 5.5 и 13 ТЗ). */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class IssueService {
     private final IssueRepository issueRepository;
+    private final DocumentNumbers numbers;
     private final ReservationRepository reservationRepository;
     private final StockRepository stockRepository;
     private final StockMovementRepository movementRepository;
+    private final OutboxPublisher outbox;
+    private static final String SERVICE = "inventory-service";
+    private final MovementEvents movementEvents;
+    private final ShortageService shortageService;
 
     /**
      * Черновик документа: в нём только фактически выдаваемые количества. Каждая позиция раскладывается
@@ -40,8 +50,18 @@ public class IssueService {
         if (issueRepository.existsByRequestIdAndStatus(req.requestId(), Issue.Status.DRAFT)) {
             throw ApiException.conflict("DRAFT_EXISTS", "По заявке уже есть черновик документа передачи");
         }
+        // B1: откуда фактически не собрано. Выдаваемое количество раскладывается по резервам с учётом этого,
+        // иначе недостача «переехала» бы на другую строку остатка.
+        Map<UUID, BigDecimal> marks = new HashMap<>();
+        if (req.shortages() != null) {
+            for (ShortageMark m : req.shortages()) {
+                if (marks.put(m.reservationId(), m.quantity()) != null) {
+                    throw ApiException.validation("Резерв указан дважды в недостачах: " + m.reservationId());
+                }
+            }
+        }
         Issue issue = new Issue();
-        issue.setNumber(String.format("IS-%d-%06d", OffsetDateTime.now().getYear(), issueRepository.nextNumber()));
+        issue.setNumber(numbers.next("IS"));
         issue.setWarehouseId(req.warehouseId());
         issue.setRequestId(req.requestId());
         issue.setIssuedTo(req.issuedTo());
@@ -67,7 +87,7 @@ public class IssueService {
                 if (!s.getProductId().equals(ir.productId()) || !s.getWarehouseId().equals(req.warehouseId())) {
                     throw ApiException.validation("Номенклатура или склад не соответствуют резерву по позиции " + ir.requestItemId());
                 }
-                reserved = reserved.add(r.getQuantity());
+                reserved = reserved.add(issuable(r, marks));
             }
             if (reserved.compareTo(ir.quantity()) < 0) {
                 throw ApiException.conflict("INSUFFICIENT_RESERVATION", "По позиции " + ir.requestItemId()
@@ -80,7 +100,8 @@ public class IssueService {
             BigDecimal remaining = ir.quantity();
             for (Reservation r : reservations) {
                 if (remaining.signum() <= 0) break;
-                BigDecimal take = r.getQuantity().min(remaining);
+                BigDecimal take = issuable(r, marks).min(remaining);
+                if (take.signum() <= 0) continue;
                 IssueItem item = new IssueItem();
                 item.setIssue(issue);
                 item.setRequestItemId(ir.requestItemId());
@@ -93,14 +114,20 @@ public class IssueService {
             }
         }
         issue = issueRepository.save(issue);
-        log.info("AUDIT: создан документ передачи {} по заявке {}, инициатор {}", issue.getNumber(), req.requestId(), actorId);
+        outbox.audit(SERVICE, "issue.created", "ISSUE", issue.getId(), actorId, details(
+                "number", issue.getNumber(),
+                "requestId", req.requestId(),
+                "warehouseId", req.warehouseId(),
+                "issuedTo", req.issuedTo(),
+                "itemsCount", issue.getItems().size()));
         return OperationMapper.toResponse(issue);
     }
 
     /**
      * Подтверждение выдачи (разд. 13 ТЗ), одна транзакция: блокировка документа, резервов и остатков;
      * резерв → CONSUMED, физический остаток уменьшается, пишутся движения ISSUE.
-     * Выдача окончательная: неиспользованная часть резервов ВСЕЙ заявки освобождается.
+     * Выдача окончательная: неиспользованная часть резервов ВСЕЙ заявки закрывается, а по каждой такой
+     * строке остатка регистрируется недостача (B1), и строка блокируется до решения кладовщика.
      */
     @Transactional
     public IssueResponse confirm(UUID id, UUID actorId) {
@@ -125,6 +152,7 @@ public class IssueService {
         Map<UUID, Stock> stocks = stockRepository.lockAll(stockIds);
 
         OffsetDateTime now = OffsetDateTime.now();
+        int shortages = 0;
         for (Reservation r : reservations) {
             BigDecimal used = consumed.getOrDefault(r.getId(), BigDecimal.ZERO);
             Stock stock = stocks.get(r.getStock().getId());
@@ -135,6 +163,13 @@ public class IssueService {
             r.setStatus(used.signum() > 0 ? Reservation.Status.CONSUMED : Reservation.Status.RELEASED);
             r.setClosedAt(now);
             r.setClosedBy(actorId);
+            // B1: неиспользованная часть резерва = недобор при сборке. Освободить её в оборот нельзя
+            // (товара физически может не быть): строка уходит «на проверку», недостача ждёт решения кладовщика.
+            BigDecimal unused = r.getQuantity().subtract(used);
+            if (unused.signum() > 0) {
+                shortageService.register(issue, r, stock, unused, actorId);
+                shortages++;
+            }
         }
         for (IssueItem it : issue.getItems()) {
             Stock stock = stocks.get(it.getStock().getId());
@@ -153,12 +188,19 @@ public class IssueService {
             m.setPerformedAt(now);
             m.setComment("Выдача " + issue.getNumber() + " по заявке " + issue.getRequestId());
             movementRepository.save(m);
+            movementEvents.publish(m, stock.getBatch(), issue.getNumber(), details(
+                    "requestId", issue.getRequestId(),
+                    "issuedTo", issue.getIssuedTo()));
         }
         issue.setStatus(Issue.Status.CONFIRMED);
         issue.setIssuedBy(actorId);
         issue.setIssuedAt(now);
-        log.info("AUDIT: подтверждена выдача {} по заявке {}, позиций {}, инициатор {}",
-                issue.getNumber(), issue.getRequestId(), issue.getItems().size(), actorId);
+        outbox.audit(SERVICE, "issue.confirmed", "ISSUE", issue.getId(), actorId, details(
+                "number", issue.getNumber(),
+                "requestId", issue.getRequestId(),
+                "warehouseId", issue.getWarehouseId(),
+                "itemsCount", issue.getItems().size(),
+                "shortages", shortages));
         return OperationMapper.toResponse(issue);
     }
 
@@ -171,7 +213,9 @@ public class IssueService {
         }
         issue.setStatus(Issue.Status.CANCELLED);
         issue.setCancelReason(reason.trim());
-        log.info("AUDIT: отменён черновик выдачи {}, причина: {}, инициатор {}", issue.getNumber(), reason, actorId);
+        outbox.audit(SERVICE, "issue.cancelled", "ISSUE", issue.getId(), actorId, details(
+                "number", issue.getNumber(),
+                "reason", reason.trim()));
         return OperationMapper.toResponse(issue);
     }
 
@@ -189,6 +233,11 @@ public class IssueService {
         if (status != null) spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
         if (requestId != null) spec = spec.and((root, query, cb) -> cb.equal(root.get("requestId"), requestId));
         return PageResponse.from(issueRepository.findAll(spec, pageable).map(OperationMapper::toResponse));
+    }
+
+    /** Сколько можно выдать из резерва: количество резерва минус недобор, о котором сообщила комплектация. */
+    private static BigDecimal issuable(Reservation r, Map<UUID, BigDecimal> marks) {
+        return r.getQuantity().subtract(marks.getOrDefault(r.getId(), BigDecimal.ZERO)).max(BigDecimal.ZERO);
     }
 
     private static String blankToNull(String s) {

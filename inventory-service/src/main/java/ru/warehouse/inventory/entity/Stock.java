@@ -25,6 +25,24 @@ public class Stock {
     @Column(name = "section_id", nullable = false) private UUID sectionId;
     @Column(name = "section_code", nullable = false, length = 50) private String sectionCode;
 
+    /** Снимок признака секции "Нераспределено": из такой секции резервировать нельзя. */
+    @Column(name = "unassigned_zone", nullable = false)
+    private boolean unassignedZone;
+
+    /** Секция BLOCKED или ARCHIVED (по событию из warehouse-service): остаток есть, резервировать нельзя. */
+    @Column(name = "section_blocked", nullable = false)
+    private boolean sectionBlocked;
+
+    /**
+     * Строка «на проверке»: по ней зафиксирована недостача (см. StockShortage), решение за кладовщиком.
+     * Остаток физически числится, но резервировать и списывать его нельзя, пока недостача не закрыта.
+     */
+    @Column(name = "on_hold", nullable = false)
+    private boolean onHold;
+
+    @Column(name = "hold_since")
+    private OffsetDateTime holdSince;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "batch_id", nullable = false)
     private Batch batch;

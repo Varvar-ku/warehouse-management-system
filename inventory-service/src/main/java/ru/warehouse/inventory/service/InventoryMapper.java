@@ -13,14 +13,15 @@ public final class InventoryMapper {
 
     public static ReceiptResponse toResponse(Receipt r) {
         return new ReceiptResponse(r.getId(), r.getNumber(), r.getWarehouseId(), r.getSupplierName(),
-                r.getExternalDocumentNumber(), r.getStatus(), r.getReceivedAt(), r.getCreatedBy(), r.getCreatedAt(),
+                r.getExternalDocumentNumber(), r.getStatus(), r.getReceivedAt(), r.getDocumentDate(),
+                r.getCreatedBy(), r.getCreatedAt(),
                 r.getConfirmedAt(), r.getCompletedAt(), r.getCancelReason(),
                 r.getItems().stream().map(InventoryMapper::toItem).toList());
     }
 
     public static ReceiptSummary toSummary(Receipt r) {
         return new ReceiptSummary(r.getId(), r.getNumber(), r.getWarehouseId(), r.getSupplierName(),
-                r.getExternalDocumentNumber(), r.getStatus(), r.getReceivedAt(), r.getItems().size());
+                r.getExternalDocumentNumber(), r.getStatus(), r.getReceivedAt(), r.getDocumentDate(), r.getItems().size());
     }
 
     static ReceiptItemResponse toItem(ReceiptItem i) {
@@ -60,7 +61,7 @@ public final class InventoryMapper {
         Batch b = s.getBatch();
         return new StockResponse(s.getId(), s.getWarehouseId(), s.getProductId(), b.getProductSku(),
                 b.getProductName(), s.getSectionId(), s.getSectionCode(), b.getId(), b.getBatchNumber(),
-                s.getUnitCode(), s.getQuantity(), s.getReservedQuantity(), s.available());
+                s.getUnitCode(), s.getQuantity(), s.getReservedQuantity(), s.available(), s.isOnHold());
     }
 
     public static MovementResponse toResponse(StockMovement m) {

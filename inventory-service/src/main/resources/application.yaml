@@ -1,5 +1,6 @@
 server:
   port: 8084
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -7,7 +8,7 @@ spring:
   datasource:
     url: ${INVENTORY_DB_URL:jdbc:postgresql://localhost:5433/inventory_db}
     username: ${DB_USER:warehouse}
-    password: ${DB_PASSWORD:warehouse}
+    password: ${DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -23,14 +24,27 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true   # опечатки в именах полей запроса дают 400, а не молча игнорируются
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        max.block.ms: 5000
 
 app:
   security:
     jwt:
-      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен      issuer: warehouse-auth
+      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен
+      issuer: warehouse-auth
   services:
     catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
     warehouse-url: ${WAREHOUSE_SERVICE_URL:http://localhost:8083}
+    auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}   # проверка исполнителя задания на размещение (M7)
   write-off:
     comment-required-reasons: [ LOST, OTHER ]   # причины, для которых комментарий обязателен
     approval-reasons: [ LOST ]                  # причины, для которых нужно подтверждение администратора
@@ -38,11 +52,15 @@ app:
     in-progress-timeout: 2m                   # «зависший» запрос старше этого срока можно перехватить
     retention: 48h                            # сколько хранить ключи
 
+wms:
+  outbox:
+    enabled: true
+
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info   # metrics убраны: их никто не читает (при мониторинге вернуть и оставить доступ только ADMIN)
   endpoint:
     health:
       show-details: when-authorized

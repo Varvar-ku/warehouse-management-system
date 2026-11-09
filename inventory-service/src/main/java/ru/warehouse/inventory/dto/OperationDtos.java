@@ -49,7 +49,20 @@ public final class OperationDtos {
 
     public record ReserveResponse(UUID requestId, boolean fullyReserved, List<ReserveItemResult> items) {}
 
-    public record ReleaseRequest(@NotNull UUID requestId, List<UUID> requestItemIds) {}
+    /**
+     * Часть резерва, которую не удалось собрать (недобор). При снятии резерва или выдаче по такому резерву
+     * регистрируется недостача, а строка остатка блокируется до решения кладовщика (B1).
+     */
+    public record ShortageMark(
+            @NotNull UUID reservationId,
+            @NotNull @Positive @Digits(integer = 14, fraction = 4) BigDecimal quantity) {}
+
+    public record ReleaseRequest(@NotNull UUID requestId, List<UUID> requestItemIds,
+                                 List<@Valid ShortageMark> shortages) {
+        public ReleaseRequest(UUID requestId, List<UUID> requestItemIds) {
+            this(requestId, requestItemIds, null);
+        }
+    }
 
     public record ReleaseResponse(UUID requestId, int releasedReservations, BigDecimal releasedQuantity) {}
 
@@ -70,7 +83,14 @@ public final class OperationDtos {
             @NotNull UUID warehouseId,
             @NotNull UUID issuedTo,
             @Size(max = 1000) String comment,
-            @NotEmpty @Size(max = 200) List<@Valid IssueItemRequest> items) {}
+            @NotEmpty @Size(max = 200) List<@Valid IssueItemRequest> items,
+            List<@Valid ShortageMark> shortages) {   // недобор по резервам: откуда фактически не собрано
+
+        public CreateIssueRequest(UUID requestId, UUID warehouseId, UUID issuedTo, String comment,
+                                  List<IssueItemRequest> items) {
+            this(requestId, warehouseId, issuedTo, comment, items, null);
+        }
+    }
 
     public record IssueItemResponse(UUID id, UUID requestItemId, UUID productId, String productSku,
                                     String productName, UUID stockId, String sectionCode, String batchNumber,

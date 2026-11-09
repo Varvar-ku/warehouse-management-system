@@ -8,6 +8,7 @@ import ru.warehouse.inventory.entity.Receipt;
 import ru.warehouse.inventory.entity.ReceiptItem;
 import ru.warehouse.inventory.entity.StockMovement;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -35,14 +36,14 @@ public final class InventoryDtos {
             @NotNull UUID warehouseId,
             @NotBlank @Size(max = 255) String supplierName,
             @Size(max = 100) String externalDocumentNumber,
-            OffsetDateTime receivedAt,
+            LocalDate documentDate,   // дата накладной поставщика (справочно); дату приёмки назначает сервер
             @NotEmpty @Size(max = 200) List<@Valid ReceiptItemRequest> items) {}
 
     /** PATCH только для DRAFT. null = «не менять». Если передан items, список позиций заменяется целиком. */
     public record UpdateReceiptRequest(
             @Pattern(regexp = ".*\\S.*", message = "не может быть пустым") @Size(max = 255) String supplierName,
             @Size(max = 100) String externalDocumentNumber,
-            OffsetDateTime receivedAt,
+            LocalDate documentDate,
             @Size(max = 200) List<@Valid ReceiptItemRequest> items) {}
 
     /** Решение кладовщика: выбрать другую допустимую секцию (или подтвердить зону «Нераспределено»). */
@@ -59,7 +60,8 @@ public final class InventoryDtos {
             @NotNull @Positive @Digits(integer = 14, fraction = 4) BigDecimal quantity,
             @Size(max = 1000) String comment) {}
 
-    public enum ResolveDecision { ACCEPT_ACTUAL, RETURN_TO_PLACEMENT }
+    /** REJECT_LINE (B4): позиция не размещена (недостача, брак, потеря): закрывается с нулевым приходом. */
+    public enum ResolveDecision { ACCEPT_ACTUAL, RETURN_TO_PLACEMENT, REJECT_LINE }
 
     public record ResolveRequest(
             @NotNull ResolveDecision decision,
@@ -88,13 +90,14 @@ public final class InventoryDtos {
 
     public record ReceiptResponse(
             UUID id, String number, UUID warehouseId, String supplierName, String externalDocumentNumber,
-            Receipt.Status status, OffsetDateTime receivedAt, UUID createdBy, OffsetDateTime createdAt,
+            Receipt.Status status, OffsetDateTime receivedAt, LocalDate documentDate,
+            UUID createdBy, OffsetDateTime createdAt,
             OffsetDateTime confirmedAt, OffsetDateTime completedAt, String cancelReason,
             List<ReceiptItemResponse> items) {}
 
     public record ReceiptSummary(UUID id, String number, UUID warehouseId, String supplierName,
                                  String externalDocumentNumber, Receipt.Status status,
-                                 OffsetDateTime receivedAt, int itemsCount) {}
+                                 OffsetDateTime receivedAt, LocalDate documentDate, int itemsCount) {}
 
     public record CandidateDto(UUID sectionId, String sectionCode, BigDecimal freeCapacity) {}
 
@@ -118,7 +121,8 @@ public final class InventoryDtos {
     public record StockResponse(
             UUID id, UUID warehouseId, UUID productId, String productSku, String productName,
             UUID sectionId, String sectionCode, UUID batchId, String batchNumber, String unitCode,
-            BigDecimal quantity, BigDecimal reservedQuantity, BigDecimal availableQuantity) {}
+            BigDecimal quantity, BigDecimal reservedQuantity, BigDecimal availableQuantity,
+            boolean onHold) {}
 
     public record MovementResponse(
             UUID id, StockMovement.Type movementType, UUID warehouseId, UUID productId, UUID batchId,

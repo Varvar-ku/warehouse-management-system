@@ -10,6 +10,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.warehouse.common.dto.PageResponse;
 import ru.warehouse.common.exception.ApiException;
+import ru.warehouse.common.numbering.DocumentNumbers;
+import ru.warehouse.common.validation.QuantityRules;
 import ru.warehouse.inventory.config.WriteOffPolicy;
 import ru.warehouse.inventory.dto.OperationDtos.*;
 import ru.warehouse.inventory.entity.Stock;
@@ -21,6 +23,8 @@ import ru.warehouse.inventory.repository.StockRepository;
 import ru.warehouse.inventory.repository.WriteOffRepository;
 import java.time.OffsetDateTime;
 import java.util.*;
+import ru.warehouse.common.event.OutboxPublisher;
+import static ru.warehouse.common.event.OutboxPublisher.details;
 
 /** Списание (разд. 14 ТЗ). */
 @Slf4j
@@ -28,9 +32,14 @@ import java.util.*;
 @RequiredArgsConstructor
 public class WriteOffService {
     private final WriteOffRepository writeOffRepository;
+    private final DocumentNumbers numbers;
     private final StockRepository stockRepository;
     private final StockMovementRepository movementRepository;
     private final WriteOffPolicy policy;
+    private final OutboxPublisher outbox;
+
+    private static final String SERVICE = "inventory-service";
+    private final MovementEvents movementEvents;
 
     @Transactional
     public WriteOffResponse create(CreateWriteOffRequest req, UUID actorId) {
@@ -48,7 +57,7 @@ public class WriteOffService {
         stockRepository.findAllById(stockIds).forEach(s -> stocks.put(s.getId(), s));
 
         WriteOff w = new WriteOff();
-        w.setNumber(String.format("WO-%d-%06d", OffsetDateTime.now().getYear(), writeOffRepository.nextNumber()));
+        w.setNumber(numbers.next("WO"));
         w.setWarehouseId(req.warehouseId());
         w.setCreatedBy(actorId);
         w.setReason(req.reasonCode());
@@ -58,6 +67,7 @@ public class WriteOffService {
         for (WriteOffItemRequest i : req.items()) {
             Stock s = stocks.get(i.stockId());
             if (s == null) throw ApiException.validation("Остаток не найден: " + i.stockId());
+            if (s.isOnHold()) throw onHold(s);
             if (!s.getWarehouseId().equals(req.warehouseId())) {
                 throw ApiException.validation("Остаток " + i.stockId() + " принадлежит другому складу");
             }
@@ -75,8 +85,12 @@ public class WriteOffService {
             w.getItems().add(item);
         }
         w = writeOffRepository.save(w);
-        log.info("AUDIT: создано списание {} (причина {}, подтверждение администратора: {}), инициатор {}",
-                w.getNumber(), w.getReason(), w.isApprovalRequired(), actorId);
+        outbox.audit(SERVICE, "writeoff.created", "WRITE_OFF", w.getId(), actorId, details(
+                "number", w.getNumber(),
+                "reason", w.getReason(),
+                "approvalRequired", w.isApprovalRequired(),
+                "warehouseId", w.getWarehouseId(),
+                "itemsCount", w.getItems().size()));
         return OperationMapper.toResponse(w);
     }
 
@@ -91,10 +105,14 @@ public class WriteOffService {
         if (!w.isApprovalRequired()) {
             throw ApiException.conflict("APPROVAL_NOT_REQUIRED", "Для этого списания подтверждение администратора не требуется");
         }
+        if (w.getCreatedBy().equals(adminId)) { // S6: одобряющий не автор (как в корректировках)
+            throw ApiException.forbidden("SELF_APPROVAL", "Списание не может одобрить его автор");
+        }
         if (w.getApprovedAt() == null) {
             w.setApprovedBy(adminId);
             w.setApprovedAt(OffsetDateTime.now());
-            log.info("AUDIT: администратор {} подтвердил списание {}", adminId, w.getNumber());
+            outbox.audit(SERVICE, "writeoff.approved", "WRITE_OFF", w.getId(), adminId, details(
+                    "number", w.getNumber()));
         }
         return OperationMapper.toResponse(w);
     }
@@ -116,6 +134,7 @@ public class WriteOffService {
         List<String> problems = new ArrayList<>();
         for (WriteOffItem item : w.getItems()) {
             Stock s = stocks.get(item.getStock().getId());
+            if (s.isOnHold()) throw onHold(s);
             if (s.available().compareTo(item.getQuantity()) < 0) {
                 problems.add("Остаток " + s.getSectionCode() + " / " + s.getBatch().getBatchNumber() + ": доступно "
                         + s.available().toPlainString() + ", к списанию " + item.getQuantity().toPlainString());
@@ -144,12 +163,18 @@ public class WriteOffService {
             m.setComment("Списание " + w.getNumber() + ", причина " + w.getReason()
                     + (w.getComment() == null ? "" : ": " + w.getComment()));
             movementRepository.save(m);
+            movementEvents.publish(m, s.getBatch(), w.getNumber(), details(
+                    "reason", String.valueOf(w.getReason()),
+                    "comment", w.getComment(),
+                    "createdBy", w.getCreatedBy()));
         }
         w.setStatus(WriteOff.Status.CONFIRMED);
         w.setConfirmedBy(actorId);
         w.setConfirmedAt(now);
-        log.info("AUDIT: подтверждено списание {} ({}), позиций {}, инициатор {}",
-                w.getNumber(), w.getReason(), w.getItems().size(), actorId);
+        outbox.audit(SERVICE, "writeoff.confirmed", "WRITE_OFF", w.getId(), actorId, details(
+                "number", w.getNumber(),
+                "reason", w.getReason(),
+                "itemsCount", w.getItems().size()));
         return OperationMapper.toResponse(w);
     }
 
@@ -163,7 +188,9 @@ public class WriteOffService {
         w.setStatus(WriteOff.Status.CANCELLED);
         w.setCancelledBy(actorId);
         w.setCancelReason(reason.trim());
-        log.info("AUDIT: отменено списание {}, причина: {}, инициатор {}", w.getNumber(), reason, actorId);
+        outbox.audit(SERVICE, "writeoff.cancelled", "WRITE_OFF", w.getId(), actorId, details(
+                "number", w.getNumber(),
+                "cancelReason", reason.trim()));
         return OperationMapper.toResponse(w);
     }
 
@@ -181,6 +208,12 @@ public class WriteOffService {
         if (status != null) spec = spec.and((root, query, cb) -> cb.equal(root.get("status"), status));
         if (reason != null) spec = spec.and((root, query, cb) -> cb.equal(root.get("reason"), reason));
         return PageResponse.from(writeOffRepository.findAll(spec, pageable).map(OperationMapper::toResponse));
+    }
+
+    /** Остаток с открытой недостачей списывать нельзя: сначала закрыть недостачу корректировкой или «найдено». */
+    private static ApiException onHold(Stock s) {
+        return ApiException.conflict("STOCK_ON_HOLD", "Остаток " + s.getSectionCode() + " / "
+                + s.getBatch().getBatchNumber() + " на проверке из-за недостачи: сначала закройте недостачу");
     }
 
     private static String blankToNull(String s) {

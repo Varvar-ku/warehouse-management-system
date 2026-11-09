@@ -9,18 +9,19 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import ru.warehouse.inventory.dto.OperationDtos.*;
+import ru.warehouse.inventory.security.RequestServiceOnly;
 import ru.warehouse.inventory.service.ReservationService;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Резервы. Вызывается интерфейсом кладовщика и (с этапа 5) request-service с пересылкой JWT пользователя.
- * POST /reservations требует заголовок Idempotency-Key (проверяет фильтр).
+ * Резервы. Чтение (availability, список) доступно кладовщику и request-service. Создание и снятие резерва
+ * только для request-service со служебным токеном (P1-10). POST /reservations требует Idempotency-Key.
  */
 @RestController
 @RequestMapping("/api/v1/reservations")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('STOREKEEPER')")
+@PreAuthorize("hasAnyRole('STOREKEEPER', 'SERVICE')")
 public class ReservationController {
     private final ReservationService reservationService;
 
@@ -31,11 +32,13 @@ public class ReservationController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
+    @RequestServiceOnly
     public ReserveResponse reserve(@Valid @RequestBody ReserveRequest request, @AuthenticationPrincipal Jwt jwt) {
         return reservationService.reserve(request, UUID.fromString(jwt.getSubject()));
     }
 
     @PostMapping("/release")
+    @RequestServiceOnly
     public ReleaseResponse release(@Valid @RequestBody ReleaseRequest request, @AuthenticationPrincipal Jwt jwt) {
         return reservationService.release(request, UUID.fromString(jwt.getSubject()));
     }

@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.warehouse.common.exception.ApiException;
+import ru.warehouse.common.validation.QuantityRules;
 import ru.warehouse.inventory.dto.OperationDtos.*;
 import ru.warehouse.inventory.entity.Reservation;
 import ru.warehouse.inventory.entity.Stock;
@@ -15,6 +16,8 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import ru.warehouse.common.event.OutboxPublisher;
+import static ru.warehouse.common.event.OutboxPublisher.details;
 
 /**
  * Резервирование (разд. 11 ТЗ). Всё внутри одной транзакции: строки остатков блокируются FOR UPDATE
@@ -27,6 +30,10 @@ import java.util.stream.Collectors;
 public class ReservationService {
     private final StockRepository stockRepository;
     private final ReservationRepository reservationRepository;
+    private final OutboxPublisher outbox;
+    private final ShortageService shortageService;
+
+    private static final String SERVICE = "inventory-service";
 
     /** Проверка наличия: доступно = физический остаток минус зарезервированное. Ничего не меняет. */
     @Transactional(readOnly = true)
@@ -78,7 +85,7 @@ public class ReservationService {
             for (UUID stockId : ids) {
                 if (remaining.signum() <= 0) break;
                 Stock stock = locked.get(stockId);
-                if (stock == null) continue;
+                if (stock == null || stock.isOnHold()) continue; // строка могла уйти «на проверку» между выбором и блокировкой
                 if (!unitChecked) {
                     QuantityRules.require(stock.getUnitCode(), stock.getBatch().isUnitAllowFractions(),
                             item.quantity(), "Количество к резервированию");
@@ -108,15 +115,15 @@ public class ReservationService {
             results.add(new ReserveItemResult(item.requestItemId(), item.productId(), item.quantity(), reserved,
                     remaining, allocations));
         }
-        if (!req.allowPartial() && !shortages.isEmpty()) {
-            boolean allowPartial = Boolean.TRUE.equals(req.allowPartial());
-            if (!allowPartial && !shortages.isEmpty()) {
-                // исключение откатывает всю транзакцию: частично созданные резервы не остаются
-                throw ApiException.conflict("INSUFFICIENT_STOCK", "Недостаточно свободного остатка", shortages);
-            }
+        boolean allowPartial = Boolean.TRUE.equals(req.allowPartial()); // null = не разрешено
+        if (!allowPartial && !shortages.isEmpty()) {
+            // исключение откатывает всю транзакцию: частично созданные резервы не остаются
+            throw ApiException.conflict("INSUFFICIENT_STOCK", "Недостаточно свободного остатка", shortages);
         }
-        log.info("AUDIT: резерв по заявке {}: позиций {}, полностью {}, инициатор {}",
-                req.requestId(), results.size(), shortages.isEmpty(), actorId);
+        outbox.audit(SERVICE, "reservation.created", "REQUEST", req.requestId(), actorId, details(
+                "warehouseId", req.warehouseId(),
+                "itemsCount", results.size(),
+                "fullyReserved", shortages.isEmpty()));
         return new ReserveResponse(req.requestId(), shortages.isEmpty(), results);
     }
 
@@ -131,6 +138,15 @@ public class ReservationService {
                 active.stream().map(r -> r.getStock().getId()).collect(Collectors.toSet()));
         OffsetDateTime now = OffsetDateTime.now();
         BigDecimal total = BigDecimal.ZERO;
+        // B1: недобор при сборе. Его нельзя вернуть в оборот как доступный остаток: строка уходит «на проверку»
+        Map<UUID, BigDecimal> marks = new HashMap<>();
+        if (req.shortages() != null) {
+            for (ShortageMark m : req.shortages()) {
+                if (marks.put(m.reservationId(), m.quantity()) != null) {
+                    throw ApiException.validation("Резерв указан дважды в недостачах: " + m.reservationId());
+                }
+            }
+        }
         for (Reservation r : active) {
             Stock stock = stocks.get(r.getStock().getId());
             stock.setReservedQuantity(stock.getReservedQuantity().subtract(r.getQuantity()));
@@ -139,9 +155,20 @@ public class ReservationService {
             r.setClosedAt(now);
             r.setClosedBy(actorId);
             total = total.add(r.getQuantity());
+            BigDecimal missing = marks.get(r.getId());   // повторный вызов: резерв уже закрыт, отметка игнорируется
+            if (missing != null) {
+                if (missing.compareTo(r.getQuantity()) > 0) {
+                    throw ApiException.validation("Недобор " + missing.toPlainString() + " больше резерва "
+                            + r.getQuantity().toPlainString() + " (" + r.getId() + ")");
+                }
+                shortageService.registerOnRelease(r, stock, missing, actorId);
+            }
         }
-        log.info("AUDIT: снят резерв по заявке {}: записей {}, количество {}, инициатор {}",
-                req.requestId(), active.size(), total, actorId);
+        if (!active.isEmpty()) {   // повторный вызов идемпотентен: пустое событие не пишем
+            outbox.audit(SERVICE, "reservation.released", "REQUEST", req.requestId(), actorId, details(
+                    "records", active.size(),
+                    "quantity", total.toPlainString()));
+        }
         return new ReleaseResponse(req.requestId(), active.size(), total);
     }
 

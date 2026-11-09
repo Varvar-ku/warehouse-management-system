@@ -4,7 +4,7 @@ package ru.warehouse.inventory.service;
 import org.junit.jupiter.api.Test;
 import ru.warehouse.common.exception.ApiException;
 import java.math.BigDecimal;
-
+import ru.warehouse.common.validation.QuantityRules;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

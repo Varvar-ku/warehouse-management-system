@@ -1,6 +1,8 @@
 // PlacementTaskRepository.java
 package ru.warehouse.inventory.repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -18,4 +20,9 @@ public interface PlacementTaskRepository extends JpaRepository<PlacementTask, UU
     @Override
     @EntityGraph(attributePaths = "receipt")
     List<PlacementTask> findAll(Specification<PlacementTask> spec, Sort sort);
+
+    /** M11: постраничная выборка (список заданий не должен быть неограниченным). */
+    @Override
+    @EntityGraph(attributePaths = "receipt")
+    Page<PlacementTask> findAll(Specification<PlacementTask> spec, Pageable pageable);
 }

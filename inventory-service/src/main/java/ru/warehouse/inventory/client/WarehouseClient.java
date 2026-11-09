@@ -6,6 +6,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import ru.warehouse.common.client.Remote;
 import ru.warehouse.common.exception.ApiException;
 import ru.warehouse.inventory.client.WarehouseContract.*;
 import java.util.List;
@@ -31,6 +32,18 @@ public class WarehouseClient {
                 .uri("/api/v1/sections/{id}", id).retrieve().body(SectionInfo.class));
         if (info == null) throw ApiException.upstream("warehouse-service вернул пустой ответ");
         return info;
+    }
+
+    /** Подходит ли секция позиции по статусу, типу, материалу, размерам и предельной вместимости (роль STOREKEEPER или WAREHOUSE_WORKER). */
+    public SectionFit validate(ValidateRequest request) {
+        SectionFit fit = Remote.call("warehouse-service", () -> client.post()
+                .uri("/api/v1/placement/validate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(SectionFit.class));
+        if (fit == null) throw ApiException.upstream("warehouse-service вернул пустой ответ");
+        return fit;
     }
 
     /** Расчёт рекомендуемых секций (нужна роль STOREKEEPER: пересылается JWT пользователя). */
