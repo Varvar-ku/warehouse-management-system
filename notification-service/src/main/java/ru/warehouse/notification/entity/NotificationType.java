@@ -1,0 +1,12 @@
+package ru.warehouse.notification.entity;
+
+public enum NotificationType {
+    REQUEST_APPROVED,
+    REQUEST_PARTIALLY_AVAILABLE,
+    REQUEST_RESERVED,
+    REQUEST_RESERVED_PARTIAL,
+    REQUEST_READY_FOR_ISSUE,
+    REQUEST_ISSUED,
+    REQUEST_REJECTED,
+    REQUEST_CANCELLED
+}

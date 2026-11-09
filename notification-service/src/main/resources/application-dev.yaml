@@ -1,0 +1,11 @@
+spring:
+  datasource:
+    password: ${DB_PASSWORD:warehouse}
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+  notification:
+    kafka:
+      # dev: дополнительно тестовый топик для scenario-7-notifications (в рабочей конфигурации его нет)
+      events-topics: wms.audit.v1,request-events

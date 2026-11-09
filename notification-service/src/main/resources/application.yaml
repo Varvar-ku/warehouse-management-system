@@ -1,0 +1,52 @@
+server:
+  port: 8087
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  application:
+    name: notification-service
+  datasource:
+    url: ${NOTIFICATION_DB_URL:jdbc:postgresql://localhost:5433/notification_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC   # как в остальных сервисах с JPA
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}}   # единое имя KAFKA_BOOTSTRAP, как в остальных сервисах
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      ack-mode: record
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+      issuer: warehouse-auth
+
+  notification:
+    kafka:
+      # Только реальный поток аудита. Тестовый топик request-events подключается профилем dev
+      # (application-dev.yaml), чтобы в рабочей конфигурации любой писавший в него мог подделать уведомление.
+      events-topics: wms.audit.v1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
