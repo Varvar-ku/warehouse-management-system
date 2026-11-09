@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -27,7 +28,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     ResponseEntity<ApiError> handleApi(ApiException e) {
-        return build(e.getStatus(), e.getCode(), e.getMessage(), e.getDetails());
+        ResponseEntity<ApiError> response = build(e.getStatus(), e.getCode(), e.getMessage(), e.getDetails());
+        if (e.getRetryAfterSeconds() == null) {
+            return response;
+        }
+        return ResponseEntity.status(response.getStatusCode())
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(e.getRetryAfterSeconds()))
+                .body(response.getBody());
     }
 
     /** Ошибки Bean Validation: собираем «поле: сообщение». */
@@ -41,6 +48,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler({HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class})
     ResponseEntity<ApiError> handleMalformed(Exception e) {
+        // причину (поле, тип, неизвестное свойство) пишем в лог, клиенту не отдаём
+        log.warn("Запрос не удалось разобрать: {}", rootMessage(e));
         return build(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST", "Запрос не удалось разобрать", List.of());
     }
 
@@ -64,6 +73,13 @@ public class GlobalExceptionHandler {
         }
         log.error("Необработанная ошибка", e); // подробности только в лог, клиенту не отдаём
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Внутренняя ошибка сервера", List.of());
+    }
+
+    private static String rootMessage(Throwable e) {
+        Throwable t = e;
+        for (int i = 0; t.getCause() != null && i < 10; i++) t = t.getCause();
+        String m = String.valueOf(t.getMessage());
+        return m.length() > 400 ? m.substring(0, 400) + "..." : m;
     }
 
     static ResponseEntity<ApiError> build(HttpStatusCode status, String code, String message, List<String> details) {

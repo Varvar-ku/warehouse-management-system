@@ -41,6 +41,12 @@ public class JwtSecurityConfiguration {
         return decoder;
     }
 
+    /** P1-10: выпуск служебных токенов для вызовов между сервисами. */
+    @Bean
+    ServiceTokenIssuer serviceTokenIssuer(JwtProperties props, Environment env) {
+        return new ServiceTokenIssuer(JwtKeys.secretKey(props, env), props.issuer());
+    }
+
     @Bean
     JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
@@ -71,6 +77,7 @@ public class JwtSecurityConfiguration {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> {
                     auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll();
+                    auth.requestMatchers("/actuator/**").hasRole("ADMIN");   // metrics и прочее: только администратор
                     auth.requestMatchers("/error").permitAll(); // иначе ошибки контейнера превращаются в 401
                     if (publicPaths.length > 0) {
                         auth.requestMatchers(publicPaths).permitAll();

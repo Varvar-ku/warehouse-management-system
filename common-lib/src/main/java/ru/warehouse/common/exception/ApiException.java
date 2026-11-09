@@ -9,12 +9,22 @@ public class ApiException extends RuntimeException {
     private final String code;
     private final List<String> details;
 
+    private final Long retryAfterSeconds;
+
     private ApiException(HttpStatus status, String code, String message, List<String> details) {
+        this(status, code, message, details, null);
+    }
+
+    private ApiException(HttpStatus status, String code, String message, List<String> details,
+                         Long retryAfterSeconds) {
         super(message);
         this.status = status;
         this.code = code;
         this.details = details;
+        this.retryAfterSeconds = retryAfterSeconds;
     }
+
+    public Long getRetryAfterSeconds() { return retryAfterSeconds; }
 
     public HttpStatus getStatus() { return status; }
     public String getCode() { return code; }
@@ -35,6 +45,12 @@ public class ApiException extends RuntimeException {
     public static ApiException forbidden(String code, String message) {
         return new ApiException(HttpStatus.FORBIDDEN, code, message, List.of());
     }
+
+    /** Слишком много запросов (429); retryAfterSeconds попадёт в заголовок Retry-After. */
+    public static ApiException tooManyRequests(String code, String message, long retryAfterSeconds) {
+        return new ApiException(HttpStatus.TOO_MANY_REQUESTS, code, message, List.of(), retryAfterSeconds);
+    }
+
     /** Конфликт с перечнем причин (например, что именно мешает подтвердить документ). */
     public static ApiException conflict(String code, String message, List<String> details) {
         return new ApiException(HttpStatus.CONFLICT, code, message, details);
