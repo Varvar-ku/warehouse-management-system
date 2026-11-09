@@ -7,6 +7,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import ru.warehouse.catalog.dto.CatalogDtos.*;
 import ru.warehouse.catalog.service.ProductService;
+import ru.warehouse.catalog.service.ProductUsageGuard;
 import ru.warehouse.common.dto.PageResponse;
 import java.util.List;
 import java.util.UUID;
@@ -20,6 +21,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ProductController {
     private final ProductService productService;
+    private final ProductUsageGuard usageGuard;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -60,6 +62,11 @@ public class ProductController {
     @PostMapping("/{id}/archive")
     @PreAuthorize("hasRole('ADMIN')")
     public ProductResponse archive(@PathVariable UUID id) {
+        ProductResponse current = productService.get(id);
+        if (!current.active()) {
+            return current; // уже в архиве: операция идемпотентна
+        }
+        usageGuard.assertArchivable(id); // M4: остатки и открытые документы, до транзакции архивации
         return productService.archive(id);
     }
 

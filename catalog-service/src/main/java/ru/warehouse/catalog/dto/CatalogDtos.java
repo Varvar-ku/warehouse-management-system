@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import ru.warehouse.catalog.entity.AttributeDataType;
+import ru.warehouse.catalog.entity.UnitDimension;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -68,18 +69,20 @@ public final class CatalogDtos {
     public record ProductTypeResponse(UUID id, String code, String name, String description, boolean active) {}
 
     public record UnitRequest(@NotBlank @Size(max = 20) String code, @NotBlank @Size(max = 50) String name,
-                              Boolean allowFractions) {}   // null = true
+                              Boolean allowFractions,       // null = true
+                              UnitDimension dimension) {}   // null = OTHER; LENGTH/MASS/COUNT для проверки атрибутов
 
-    public record UnitResponse(UUID id, String code, String name, boolean allowFractions) {}
+    public record UnitResponse(UUID id, String code, String name, boolean allowFractions, UnitDimension dimension) {}
 
     public record AttributeDefinitionRequest(
             @NotBlank @Size(max = 100) String code,
             @NotBlank @Size(max = 150) String name,
             @NotNull AttributeDataType dataType,
-            Set<String> options) {}   // обязателен только для REFERENCE
+            Set<String> options,      // обязателен только для REFERENCE
+            UnitDimension dimension) {}   // только для NUMBER: LENGTH или MASS (тип единицы значения), иначе null
 
     public record AttributeDefinitionResponse(
             UUID id, String code, String name, AttributeDataType dataType,
-            boolean active, Set<String> options) {}
+            boolean active, Set<String> options, UnitDimension dimension) {}
 
 }

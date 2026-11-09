@@ -24,6 +24,11 @@ public class ProductService {
     private final ProductTypeRepository typeRepository;
     private final UnitRepository unitRepository;
     private final AttributeDefinitionRepository definitionRepository;
+    private final CatalogAudit audit;
+
+    /** Для атрибутов с типом величины (длина, масса) единица значения обязательна: «1500» без единицы неоднозначно. */
+    @org.springframework.beans.factory.annotation.Value("${app.catalog.require-attribute-unit:true}")
+    private boolean requireAttributeUnit;
 
     @Transactional
     public ProductResponse create(CreateProductRequest req) {
@@ -38,7 +43,10 @@ public class ProductService {
         p.setUnit(unitRepository.findById(req.unitId()).orElseThrow(() -> ApiException.validation("Единица измерения не найдена")));
         p.setDescription(req.description());
         if (req.attributes() != null) applyAttributes(p, req.attributes());
-        return toResponse(productRepository.save(p));
+        p = productRepository.save(p);
+        audit.record("product.created", "PRODUCT", p.getId(), "sku", p.getSku(), "name", p.getName(),
+                "productType", p.getProductType().getCode(), "unit", p.getUnit().getCode());
+        return toResponse(p);
     }
 
     @Transactional(readOnly = true)
@@ -71,6 +79,12 @@ public class ProductService {
         if (req.description() != null) p.setDescription(req.description());
         if (req.attributes() != null) applyAttributes(p, req.attributes());
         p.touch(); // обновляем updated_at, даже если менялись только атрибуты
+        List<String> changed = new ArrayList<>();
+        if (req.name() != null) changed.add("name");
+        if (req.productTypeId() != null) changed.add("productType");
+        if (req.description() != null) changed.add("description");
+        if (req.attributes() != null) changed.add("attributes");
+        audit.record("product.updated", "PRODUCT", p.getId(), "sku", p.getSku(), "changedFields", changed);
         return toResponse(p); // изменения сохранятся при коммите транзакции
     }
 
@@ -81,6 +95,7 @@ public class ProductService {
         if (p.isActive()) {
             p.setActive(false);
             p.touch();
+            audit.record("product.archived", "PRODUCT", p.getId(), "sku", p.getSku());
         }
         return toResponse(p);
     }
@@ -91,6 +106,7 @@ public class ProductService {
         if (!p.isActive()) {
             p.setActive(true);
             p.touch();
+            audit.record("product.restored", "PRODUCT", p.getId(), "sku", p.getSku());
         }
         return toResponse(p);
     }
@@ -189,9 +205,9 @@ public class ProductService {
                 if (req.valueNumber() == null) {
                     throw ApiException.validation("Для атрибута " + code + " нужно valueNumber");
                 }
-                if (req.valueUnitId() != null && !unitRepository.existsById(req.valueUnitId())) {
-                    throw ApiException.validation("Единица значения атрибута " + code + " не найдена");
-                }
+                Unit valueUnit = req.valueUnitId() == null ? null : unitRepository.findById(req.valueUnitId())
+                        .orElseThrow(() -> ApiException.validation("Единица значения атрибута " + code + " не найдена"));
+                checkDimension(def, valueUnit);
                 attr.setValueNumber(req.valueNumber());
                 attr.setValueUnitId(req.valueUnitId());
             }
@@ -207,6 +223,25 @@ public class ProductService {
                 }
                 attr.setValueString(req.valueString());
             }
+        }
+    }
+
+    /**
+     * M5: единица значения должна подходить по типу величины. Иначе движок размещения не сможет перевести длину
+     * (например, «1500 KG») и молча отправит позицию в «Нераспределено».
+     */
+    private void checkDimension(AttributeDefinition def, Unit unit) {
+        UnitDimension expected = def.getDimension();
+        if (expected == null) return;
+        if (unit == null) {
+            if (requireAttributeUnit) {
+                throw ApiException.validation("Для атрибута " + def.getCode() + " укажите единицу измерения (тип: " + expected + ")");
+            }
+            return;
+        }
+        if (unit.getDimension() != expected) {
+            throw ApiException.validation("Единица " + unit.getCode() + " не подходит для атрибута " + def.getCode()
+                    + ": нужна единица типа " + expected + ", а у неё " + unit.getDimension());
         }
     }
 

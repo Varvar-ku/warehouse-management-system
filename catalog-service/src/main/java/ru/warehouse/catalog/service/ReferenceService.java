@@ -17,6 +17,7 @@ public class ReferenceService {
     private final ProductTypeRepository typeRepository;
     private final UnitRepository unitRepository;
     private final AttributeDefinitionRepository definitionRepository;
+    private final CatalogAudit audit;
 
     // ----- типы деталей -----
     @Transactional(readOnly = true)
@@ -36,7 +37,9 @@ public class ReferenceService {
         t.setCode(code);
         t.setName(req.name().trim());
         t.setDescription(req.description());
-        return toResponse(typeRepository.save(t));
+        t = typeRepository.save(t);
+        audit.record("product_type.created", "PRODUCT_TYPE", t.getId(), "code", t.getCode(), "name", t.getName());
+        return toResponse(t);
     }
 
     @Transactional
@@ -45,7 +48,10 @@ public class ReferenceService {
                 .orElseThrow(() -> ApiException.notFound("PRODUCT_TYPE_NOT_FOUND", "Тип не найден"));
         if (req.name() != null) t.setName(req.name().trim());
         if (req.description() != null) t.setDescription(req.description());
+        boolean activeBefore = t.isActive();
         if (req.active() != null) t.setActive(req.active()); // деактивация вместо удаления
+        audit.record("product_type.updated", "PRODUCT_TYPE", t.getId(), "code", t.getCode(), "name", t.getName(),
+                "activeBefore", activeBefore, "activeAfter", t.isActive());
         return toResponse(t);
     }
 
@@ -53,7 +59,7 @@ public class ReferenceService {
     @Transactional(readOnly = true)
     public List<UnitResponse> listUnits() {
         return unitRepository.findAllByOrderByCodeAsc().stream()
-                .map(u -> new UnitResponse(u.getId(), u.getCode(), u.getName(), u.isAllowFractions())).toList();    }
+                .map(u -> new UnitResponse(u.getId(), u.getCode(), u.getName(), u.isAllowFractions(), u.getDimension())).toList();    }
 
     @Transactional
     public UnitResponse createUnit(UnitRequest req) {
@@ -65,8 +71,10 @@ public class ReferenceService {
         u.setCode(code);
         u.setName(req.name().trim());
         u.setAllowFractions(req.allowFractions() == null || req.allowFractions());
+        u.setDimension(req.dimension() == null ? UnitDimension.OTHER : req.dimension());
         u = unitRepository.save(u);
-        return new UnitResponse(u.getId(), u.getCode(), u.getName(), u.isAllowFractions());    }
+        audit.record("unit.created", "UNIT", u.getId(), "code", u.getCode(), "allowFractions", u.isAllowFractions(), "dimension", u.getDimension().name());
+        return new UnitResponse(u.getId(), u.getCode(), u.getName(), u.isAllowFractions(), u.getDimension());    }
 
     // ----- определения атрибутов -----
     @Transactional(readOnly = true)
@@ -88,12 +96,24 @@ public class ReferenceService {
         if (!reference && !options.isEmpty()) {
             throw ApiException.validation("options допустим только для типа REFERENCE");
         }
+        if (req.dimension() != null) {
+            if (req.dataType() != AttributeDataType.NUMBER) {
+                throw ApiException.validation("Тип величины (dimension) задаётся только для числового атрибута");
+            }
+            if (req.dimension() != UnitDimension.LENGTH && req.dimension() != UnitDimension.MASS) {
+                throw ApiException.validation("Для атрибута допустим тип величины LENGTH или MASS");
+            }
+        }
         AttributeDefinition d = new AttributeDefinition();
         d.setCode(code);
+        d.setDimension(req.dimension());
         d.setName(req.name().trim());
         d.setDataType(req.dataType());
         d.setOptions(new HashSet<>(options));
-        return toResponse(definitionRepository.save(d));
+        d = definitionRepository.save(d);
+        audit.record("attribute_definition.created", "ATTRIBUTE_DEFINITION", d.getId(), "code", d.getCode(),
+                "dataType", d.getDataType().name());
+        return toResponse(d);
     }
 
     // Коды храним в верхнем регистре, чтобы «pcs» и «PCS» не считались разными
@@ -107,6 +127,6 @@ public class ReferenceService {
 
     private AttributeDefinitionResponse toResponse(AttributeDefinition d) {
         return new AttributeDefinitionResponse(d.getId(), d.getCode(), d.getName(), d.getDataType(),
-                d.isActive(), Set.copyOf(d.getOptions()));
+                d.isActive(), Set.copyOf(d.getOptions()), d.getDimension());
     }
 }

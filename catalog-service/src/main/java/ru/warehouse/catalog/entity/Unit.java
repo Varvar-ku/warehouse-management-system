@@ -19,6 +19,11 @@ public class Unit {
     @Column(nullable = false, length = 50)
     private String name;
 
+    /** Тип величины (длина, масса, штуки): по нему проверяется единица значения числового атрибута. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UnitDimension dimension = UnitDimension.OTHER;
+
     /** false = количество в этой единице должно быть целым (штуки). */
     @Column(name = "allow_fractions", nullable = false)
     private boolean allowFractions = true;

@@ -1,5 +1,6 @@
 server:
   port: 8082
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -9,7 +10,7 @@ spring:
     # В других средах переопределяются переменными окружения.
     url: ${CATALOG_DB_URL:jdbc:postgresql://localhost:5433/catalog_db}
     username: ${DB_USER:warehouse}
-    password: ${DB_PASSWORD:warehouse}
+    password: ${DB_PASSWORD}
   jpa:
     open-in-view: false          # запросы к БД только внутри сервисного слоя
     hibernate:
@@ -22,12 +23,27 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        max.block.ms: 5000
+
+wms:
+  outbox:
+    enabled: true     # события аудита уходят в Kafka через outbox
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info   # metrics убраны: их никто не читает (при мониторинге вернуть и оставить доступ только ADMIN)
   endpoint:
     health:
       show-details: when-authorized   # не раскрываем детали посторонним
@@ -36,4 +52,5 @@ app:
   security:
     jwt:
       # Секрет должен совпадать во всех сервисах и в gateway
-      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен      issuer: warehouse-auth
+      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен
+      issuer: warehouse-auth
