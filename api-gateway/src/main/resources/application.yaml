@@ -1,5 +1,6 @@
 server:
   port: 8080
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -9,12 +10,9 @@ spring:
       server:
         webmvc:
           routes:
-            # Маршруты на этапе 2. Остальные сервисы добавляются по мере появления
             - id: auth-service
               uri: ${AUTH_SERVICE_URL:http://localhost:8081}
               predicates:
-                # /** совпадает и с самим путём (/api/v1/me), и со всем, что глубже
-                - Path=/api/v1/auth/**,/api/v1/me/**,/api/v1/users/**,/api/v1/roles/**
                 - Path=/api/v1/auth/**,/api/v1/me/**,/api/v1/users/**,/api/v1/roles/**,/api/v1/directory/**
             - id: catalog-service
               uri: ${CATALOG_SERVICE_URL:http://localhost:8082}
@@ -27,23 +25,31 @@ spring:
             - id: inventory-service
               uri: ${INVENTORY_SERVICE_URL:http://localhost:8084}
               predicates:
-                - Path=/api/v1/receipts/**,/api/v1/placement-tasks/**,/api/v1/stock/**,/api/v1/reservations/**,/api/v1/issues/**,/api/v1/write-offs/**
+                - Path=/api/v1/receipts/**,/api/v1/placement-tasks/**,/api/v1/stock/**,/api/v1/reservations/**,/api/v1/issues/**,/api/v1/write-offs/**,/api/v1/shortages/**,/api/v1/adjustments/**
             - id: request-service
               uri: ${REQUEST_SERVICE_URL:http://localhost:8085}
               predicates:
-                - Path=/api/v1/requests/**
                 - Path=/api/v1/requests/**,/api/v1/picking-tasks/**
-            # Далее (этапы 3–7):
-            #   /api/v1/warehouses/**, /api/v1/sections/**, /api/v1/placement-rules/** → warehouse-service :8083
-            #   /api/v1/stock/**, /api/v1/receipts/**, /api/v1/issues/**, /api/v1/write-offs/** → inventory-service :8084
-            #   /api/v1/requests/** → request-service :8085;  /api/v1/picking-tasks/** → picking-service :8086
+            - id: audit-service
+              uri: ${AUDIT_SERVICE_URL:http://localhost:8086}
+              predicates:
+                - Path=/api/v1/audit/**
+            - id: notification-service
+              uri: ${NOTIFICATION_SERVICE_URL:${NOTIFICATIN_SERVICE_URL:http://localhost:8087}}   # NOTIFICATIN_*: прежнее имя с опечаткой, оставлено как запасное
+              predicates:
+                - Path=/api/v1/notifications/**
+            - id: report-service
+              uri: ${REPORT_SERVICE_URL:http://localhost:8088}
+              predicates:
+                - Path=/api/v1/reports/**
 
 app:
   security:
     public-paths:
       - /api/v1/auth/login
     jwt:
-      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен      issuer: warehouse-auth
+      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен
+      issuer: warehouse-auth
   cors:
     # Адреса фронтенда (React dev-сервер). Через запятую.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
