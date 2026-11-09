@@ -1,0 +1,47 @@
+
+server:
+  port: 8088
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  application:
+    name: report-service
+  datasource:
+    url: ${REPORT_DB_URL:jdbc:postgresql://localhost:5433/report_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD}
+  flyway:
+    enabled: true
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}}   # единое имя KAFKA_BOOTSTRAP, как в остальных сервисах
+    consumer:
+      group-id: report-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      ack-mode: record
+
+app:
+  services:
+    auth-url: ${AUTH_SERVICE_URL:http://localhost:8081}
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}
+      issuer: warehouse-auth
+  report:
+    # Часовой пояс для границ суток в фильтрах from/to
+    zone: Europe/Moscow
+    kafka:
+      movements-topic: wms.stock-movements.v1
+      audit-topic: wms.audit.v1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
