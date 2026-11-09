@@ -31,6 +31,9 @@
 		<module>warehouse-service</module>
 		<module>inventory-service</module>
 		<module>request-service</module>
+		<module>audit-service</module>
+		<module>notification-service</module>
+		<module>report-service</module>
 	</modules>
 
 	<dependencyManagement>
