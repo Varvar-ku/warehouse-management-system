@@ -1,3 +1,4 @@
+if (-not $env:WMS_ADMIN_PASSWORD) { throw "Run: . .\scripts\dev-env.ps1" }
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\api.ps1"
 
@@ -21,7 +22,7 @@ function Summary {
 }
 
 # ---- accounts and reference data ----
-$ha = Login "admin" "Admin-2026-dev"
+$ha = Login "admin" $env:WMS_ADMIN_PASSWORD
 $hs = Login "store1" "Store-12345"
 foreach ($u in @("user1", "user2")) {
   try { Post "$g/users" @{ login=$u; password="User-12345"; fullName="Test $u"; roles=@("USER") } $ha | Out-Null } catch { }

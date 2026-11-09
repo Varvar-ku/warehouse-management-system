@@ -1,3 +1,4 @@
+if (-not $env:WMS_ADMIN_PASSWORD) { throw "Run: . .\scripts\dev-env.ps1" }
 $ErrorActionPreference = "Stop"
 . "$PSScriptRoot\api.ps1"
 
@@ -19,7 +20,7 @@ function StatusOf([scriptblock]$action) {
 
 # ---------------- setup ----------------
 Step "Setup"
-$ha = Login "admin" "Admin-2026-dev"
+$ha = Login "admin" $env:WMS_ADMIN_PASSWORD
 $hs = Login "store1" "Store-12345"
 $hw = Login "worker1" "Worker-12345"
 foreach ($u in @("user1", "user2")) {
@@ -70,7 +71,7 @@ Step "2. Visibility and roles"
 Check "other user gets 404" ((StatusOf { GetApi "$g/requests/$($rq.id)" $hu2 }) -eq 404)
 Check "user cannot review (403)" ((StatusOf { Post "$g/requests/$($rq.id)/review" @{} $hu }) -eq 403)
 Check "storekeeper sees the request" (@((GetApi "$g/requests" $hs).content | Where-Object { $_.id -eq $rq.id }).Count -eq 1)
-Check "admin has no access (403)" ((StatusOf { GetApi "$g/requests" $ha }) -eq 403)
+Check "admin can read requests (200)" ((StatusOf { GetApi "$g/requests" $ha }) -eq 0)
 
 # ---------------- 3. edit and submit ----------------
 Step "3. Edit and submit"

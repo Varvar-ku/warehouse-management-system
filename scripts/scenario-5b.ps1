@@ -44,8 +44,7 @@ Check "worker2 sees overall progress" ([decimal]$v2.progress.totalQuantity -eq 6
 Check "worker2 progress lists only himself" (@($v2.progress.workers).Count -eq 1)
 Check "worker2 cannot pick worker1 row (403)" ((StatusOf { Post "$g/picking-tasks/$($t.id)/items/$($rows1[0].id)/pick" @{ pickedQuantity=1 } $hw2 }) -eq 403)
 Check "storekeeper cannot pick (403)" ((StatusOf { Post "$g/picking-tasks/$($t.id)/items/$($rows1[0].id)/pick" @{ pickedQuantity=1 } $hs }) -eq 403)
-Check "non-participant sees no task (404)" ((StatusOf { GetApi "$g/picking-tasks/$($t.id)" $hu }) -eq 403)
-
+Check "user role cannot see task (403)" ((StatusOf { GetApi "$g/picking-tasks/$($t.id)" $hu }) -eq 403)
 # ---------------- 5. picking with a shortage ----------------
 Step "5. Picking: worker1 exact, worker2 short by 1"
 foreach ($row in $rows1) {
