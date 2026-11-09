@@ -1,0 +1,36 @@
+server:
+  port: 8086
+  address: ${SERVER_ADDRESS:127.0.0.1}
+
+spring:
+  application:
+    name: audit-service
+  datasource:
+    url: ${AUDIT_DB_URL:jdbc:postgresql://localhost:5433/audit_db}
+    username: ${DB_USER:warehouse}
+    password: ${DB_PASSWORD}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:9092}
+    consumer:
+      group-id: audit-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:}             # без значения по умолчанию; для разработки включите профиль dev
+      issuer: warehouse-auth
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
