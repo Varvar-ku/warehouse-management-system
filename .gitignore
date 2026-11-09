@@ -31,3 +31,23 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Secrets and junk ###
+.env
+*.env
+!.env.example
+*.zip
+
+### Build, logs, tooling ###
+node_modules/
+frontend/dist/
+*.log
+*.patch
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
+
+### Stray npm files in the repository root (frontend has its own) ###
+/package-lock.json
+/package.json
