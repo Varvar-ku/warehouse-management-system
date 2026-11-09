@@ -22,7 +22,14 @@ public final class InventoryContract {
                                     BigDecimal reserved, BigDecimal shortage) {}
     public record ReserveResponse(UUID requestId, boolean fullyReserved, List<ReserveItemResult> items) {}
 
-    public record ReleaseRequest(UUID requestId, List<UUID> requestItemIds) {}
+    /** Недобор по резерву: при снятии резерва или выдаче inventory регистрирует недостачу (B1). */
+    public record ShortageMark(UUID reservationId, BigDecimal quantity) {}
+
+    public record ReleaseRequest(UUID requestId, List<UUID> requestItemIds, List<ShortageMark> shortages) {
+        public ReleaseRequest(UUID requestId, List<UUID> requestItemIds) {
+            this(requestId, requestItemIds, null);
+        }
+    }
     public record ReleaseResponse(UUID requestId, int releasedReservations, BigDecimal releasedQuantity) {}
 
     public record ReservationDto(UUID id, UUID requestId, UUID requestItemId, UUID stockId, UUID sectionId,
@@ -31,6 +38,12 @@ public final class InventoryContract {
 
     public record IssueLine(UUID requestItemId, UUID productId, BigDecimal quantity) {}
     public record CreateIssueRequest(UUID requestId, UUID warehouseId, UUID issuedTo, String comment,
-                                     List<IssueLine> items) {}
+                                     List<IssueLine> items, List<ShortageMark> shortages) {
+        public CreateIssueRequest(UUID requestId, UUID warehouseId, UUID issuedTo, String comment,
+                                  List<IssueLine> items) {
+            this(requestId, warehouseId, issuedTo, comment, items, null);
+        }
+    }
     public record IssueDto(UUID id, String number, UUID requestId, String status) {}
+    public record CancelIssueRequest(String reason) {}
 }

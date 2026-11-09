@@ -38,6 +38,9 @@ public final class RequestDtos {
     /** Решение кладовщика при частичном обеспечении: какие количества резервировать (необязательно). */
     public record ReserveDto(List<@Valid ItemApproval> items) {}
 
+    /** Порядок списка: NEWEST по умолчанию (новые сверху); PRIORITY для очереди кладовщика: срочные, затем раньше поданные. */
+    public enum RequestSort { NEWEST, PRIORITY }
+
     public record ReasonDto(@NotBlank @Size(max = 1000) String reason) {}
 
     // ================= ответы =================

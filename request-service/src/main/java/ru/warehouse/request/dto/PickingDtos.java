@@ -46,6 +46,9 @@ public final class PickingDtos {
     public record UpdateWorkerDto(PickingTaskWorker.Status status, PickingTaskWorker.Role role,
                                   @Size(max = 1000) String comment) {}
 
+    /** Исправление ошибочного ввода: кладовщик переоткрывает обработанную строку, причина обязательна. */
+    public record ReopenItemDto(@NotBlank @Size(max = 1000) String reason) {}
+
     public record ReadyDto(@Size(max = 1000) String comment) {}
 
     /** issuedTo = null: получателем становится автор заявки. */

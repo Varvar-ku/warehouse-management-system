@@ -8,8 +8,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.time.Duration;
 import ru.warehouse.common.dto.PageResponse;
 import ru.warehouse.common.exception.ApiException;
+import ru.warehouse.common.numbering.DocumentNumbers;
 import ru.warehouse.common.validation.QuantityRules;
 import ru.warehouse.request.client.CatalogClient;
 import ru.warehouse.request.client.CatalogClient.Product;
@@ -31,8 +34,13 @@ import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import ru.warehouse.request.entity.PickingItem;
 import ru.warehouse.request.entity.PickingTask;
 import ru.warehouse.request.repository.PickingTaskRepository;
+import ru.warehouse.common.event.OutboxPublisher;
+import static ru.warehouse.common.event.OutboxPublisher.details;
+import java.util.Objects;
+import java.util.function.Function;
 
 /** Жизненный цикл заявки до резервирования (разд. 5.4, 8 и 11 ТЗ). Комплектация и выдача: часть 5б. */
 @Slf4j
@@ -40,47 +48,67 @@ import ru.warehouse.request.repository.PickingTaskRepository;
 @RequiredArgsConstructor
 public class RequestService {
     private static final Set<RequestStatus> RESERVED_STATES = EnumSet.of(RequestStatus.RESERVED,
-            RequestStatus.RESERVED_PARTIAL, RequestStatus.PICKING, RequestStatus.PICKING_WITH_SHORTAGE);
+            RequestStatus.RESERVED_PARTIAL, RequestStatus.PICKING, RequestStatus.PICKING_WITH_SHORTAGE,
+            RequestStatus.READY_FOR_ISSUE);
 
     private final RequestRepository requestRepository;
+    private final DocumentNumbers numbers;
     private final StatusHistoryRepository historyRepository;
     private final CatalogClient catalogClient;
     private final WarehouseClient warehouseClient;
     private final InventoryClient inventoryClient;
     private final PickingTaskRepository pickingTaskRepository;
+    private static final String SERVICE = "request-service";
+    private final OutboxPublisher outbox;
+    private final RequestOperations ops;
+    private final TransactionTemplate tx;
+    /** Аренда операции с внешним вызовом (два вызова по 2+10 с с запасом). */
+    private static final Duration OPERATION_TTL = Duration.ofSeconds(60);
+
+    private static String total(Request r, Function<RequestItem, BigDecimal> field) {
+        return r.getItems().stream().map(field).filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add).toPlainString();
+    }
 
     // ================= пользователь: черновик и отправка =================
 
-    @Transactional
     public RequestResponse create(CreateRequestDto dto, Actor actor) {
+        // S2: обращения к warehouse-service и catalog-service выполняются до открытия транзакции
         WarehouseInfo warehouse = warehouseClient.warehouse(dto.warehouseId());
         if (!warehouse.active()) {
             throw ApiException.conflict("WAREHOUSE_INACTIVE", "Склад отключён");
         }
-        Request r = new Request();
-        r.setNumber(String.format("RQ-%d-%06d", OffsetDateTime.now().getYear(), requestRepository.nextNumber()));
-        r.setRequesterId(actor.userId());
-        r.setWarehouseId(warehouse.id());
-        r.setPriority(dto.priority() == null ? 0 : dto.priority());
-        r.setComment(blankToNull(dto.comment()));
-        fillItems(r, dto.items());
-        r = requestRepository.save(r);
-        log.info("AUDIT: создана заявка {} ({}), пользователь {}", r.getNumber(), r.getId(), actor.userId());
-        return RequestMapper.toResponse(r);
+        Map<UUID, Product> products = loadProducts(
+                dto.items().stream().map(ItemInput::productId).collect(Collectors.toSet()));
+        return tx.execute(status -> {
+            Request r = new Request();
+            r.setNumber(numbers.next("RQ"));
+            r.setRequesterId(actor.userId());
+            r.setWarehouseId(warehouse.id());
+            r.setPriority(dto.priority() == null ? 0 : dto.priority());
+            r.setComment(blankToNull(dto.comment()));
+            fillItems(r, dto.items(), products);
+            r = requestRepository.save(r);
+            log.info("AUDIT: создана заявка {} ({}), пользователь {}", r.getNumber(), r.getId(), actor.userId());
+            return RequestMapper.toResponse(r);
+        });
     }
 
-    @Transactional
     public RequestResponse update(UUID id, UpdateRequestDto dto, Actor actor) {
-        Request r = lockOwn(id, actor);
-        requireStatus(r, RequestStatus.DRAFT);
-        if (dto.priority() != null) r.setPriority(dto.priority());
-        if (dto.comment() != null) r.setComment(blankToNull(dto.comment()));
-        if (dto.items() != null) {
-            if (dto.items().isEmpty()) throw ApiException.validation("Список позиций не может быть пустым");
-            fillItems(r, dto.items());
+        if (dto.items() != null && dto.items().isEmpty()) {
+            throw ApiException.validation("Список позиций не может быть пустым");
         }
-        r.touch();
-        return RequestMapper.toResponse(r);
+        Map<UUID, Product> products = dto.items() == null ? null : loadProducts(
+                dto.items().stream().map(ItemInput::productId).collect(Collectors.toSet()));
+        return tx.execute(status -> {
+            Request r = lockOwn(id, actor);
+            requireStatus(r, RequestStatus.DRAFT);
+            if (dto.priority() != null) r.setPriority(dto.priority());
+            if (dto.comment() != null) r.setComment(blankToNull(dto.comment()));
+            if (dto.items() != null) fillItems(r, dto.items(), products);
+            r.touch();
+            return RequestMapper.toResponse(r);
+        });
     }
 
     /** Удаление черновика (разд. 8 ТЗ). Истории у черновика ещё нет, поэтому физическое удаление допустимо. */
@@ -92,45 +120,67 @@ public class RequestService {
         log.info("AUDIT: удалён черновик заявки {}, пользователь {}", r.getNumber(), actor.userId());
     }
 
-    @Transactional
     public RequestResponse submit(UUID id, Actor actor) {
-        Request r = lockOwn(id, actor);
-        requireStatus(r, RequestStatus.DRAFT);
-        if (r.getItems().isEmpty()) throw ApiException.validation("В заявке нет позиций");
-        loadProducts(productIds(r)); // номенклатура должна существовать и не быть в архиве (разд. 11 ТЗ)
-        transition(r, RequestStatus.SUBMITTED, actor.userId(), null);
-        r.setSubmittedAt(OffsetDateTime.now());
-        log.info("AUDIT: отправлена заявка {} ({}), пользователь {}", r.getNumber(), r.getId(), actor.userId());
-        return RequestMapper.toResponse(r);
+        // S2: номенклатура должна существовать и не быть в архиве (разд. 11 ТЗ): проверяем вне транзакции
+        Set<UUID> ids = tx.execute(status -> {
+            Request r = requestRepository.findById(id)
+                    .filter(x -> x.getRequesterId().equals(actor.userId()))
+                    .orElseThrow(() -> ApiException.notFound("REQUEST_NOT_FOUND", "Заявка не найдена"));
+            requireStatus(r, RequestStatus.DRAFT);
+            if (r.getItems().isEmpty()) throw ApiException.validation("В заявке нет позиций");
+            return productIds(r);
+        });
+        loadProducts(ids);
+        return tx.execute(status -> {
+            Request r = lockOwn(id, actor);
+            requireStatus(r, RequestStatus.DRAFT);
+            if (r.getItems().isEmpty()) throw ApiException.validation("В заявке нет позиций");
+            if (!productIds(r).equals(ids)) {
+                throw ApiException.conflict("CONCURRENT_MODIFICATION", "Состав заявки изменился во время проверки: повторите отправку");
+            }
+            transition(r, RequestStatus.SUBMITTED, actor.userId(), null);
+            r.setSubmittedAt(OffsetDateTime.now());
+            log.info("AUDIT: отправлена заявка {} ({}), пользователь {}", r.getNumber(), r.getId(), actor.userId());
+            return RequestMapper.toResponse(r);
+        });
     }
 
     // ================= кладовщик: проверка наличия, решение, резерв =================
 
+    private record ReviewPlan(RequestStatus previous, UUID warehouseId, List<AvailabilityLine> lines) {}
+
     /**
-     * Проверка наличия: вход в UNDER_REVIEW, расчёт доступного количества по каждой позиции
-     * и итог APPROVED (всё доступно) или PARTIALLY_AVAILABLE. Допустима и как повторная проверка.
+     * Проверка наличия (B6: промежуточного UNDER_REVIEW больше нет): расчёт доступного количества по каждой
+     * позиции и сразу итог APPROVED (всё доступно) или PARTIALLY_AVAILABLE. Допустима и как повторная проверка:
+     * если итоговый статус не изменился, обновляются количества, история статусов не пополняется.
+     * S2: запрос к inventory идёт между двумя короткими транзакциями (см. RequestOperations).
      */
-    @Transactional
     public RequestResponse review(UUID id, Actor actor) {
-        Request r = lockAny(id);
-        if (!EnumSet.of(RequestStatus.SUBMITTED, RequestStatus.APPROVED, RequestStatus.PARTIALLY_AVAILABLE)
-                .contains(r.getStatus())) {
-            throw ApiException.conflict("INVALID_STATUS", "Проверка наличия недоступна в статусе " + r.getStatus());
-        }
-        transition(r, RequestStatus.UNDER_REVIEW, actor.userId(), "Проверка наличия");
+        return ops.<ReviewPlan, List<AvailabilityItem>, RequestResponse>run(id, OPERATION_TTL,
+                r -> {
+                    if (!EnumSet.of(RequestStatus.SUBMITTED, RequestStatus.APPROVED, RequestStatus.PARTIALLY_AVAILABLE)
+                            .contains(r.getStatus())) {
+                        throw ApiException.conflict("INVALID_STATUS", "Проверка наличия недоступна в статусе " + r.getStatus());
+                    }
+                    // Спрос по номенклатуре суммируем: inventory принимает каждую номенклатуру один раз
+                    Map<UUID, BigDecimal> demand = new LinkedHashMap<>();
+                    for (RequestItem i : r.getItems()) demand.merge(i.getProductId(), i.getRequestedQuantity(), BigDecimal::add);
+                    List<AvailabilityLine> lines = demand.entrySet().stream()
+                            .map(e -> new AvailabilityLine(e.getKey(), e.getValue())).toList();
+                    return new ReviewPlan(r.getStatus(), r.getWarehouseId(), lines);
+                },
+                plan -> inventoryClient.availability(plan.warehouseId(), plan.lines()),
+                (r, plan, availability) -> applyReview(r, plan.previous(), availability, actor));
+    }
+
+    private RequestResponse applyReview(Request r, RequestStatus previous, List<AvailabilityItem> availability, Actor actor) {
+        requireStatus(r, previous);
         r.setReviewedBy(actor.userId());
         r.setReviewedAt(OffsetDateTime.now());
-
-        // Спрос по номенклатуре суммируем: inventory принимает каждую номенклатуру один раз
-        Map<UUID, BigDecimal> demand = new LinkedHashMap<>();
-        for (RequestItem i : r.getItems()) demand.merge(i.getProductId(), i.getRequestedQuantity(), BigDecimal::add);
-        List<AvailabilityLine> lines = demand.entrySet().stream()
-                .map(e -> new AvailabilityLine(e.getKey(), e.getValue())).toList();
         Map<UUID, BigDecimal> available = new HashMap<>();
-        for (AvailabilityItem a : inventoryClient.availability(r.getWarehouseId(), lines)) {
+        for (AvailabilityItem a : availability) {
             available.put(a.productId(), a.available());
         }
-
         List<BigDecimal> approved = AvailabilityAllocator.allocate(
                 r.getItems().stream().map(RequestItem::getProductId).toList(),
                 r.getItems().stream().map(RequestItem::getRequestedQuantity).toList(), available);
@@ -140,33 +190,70 @@ public class RequestService {
             item.setApprovedQuantity(approved.get(i));
             if (approved.get(i).compareTo(item.getRequestedQuantity()) < 0) everythingAvailable = false;
         }
-        transition(r, everythingAvailable ? RequestStatus.APPROVED : RequestStatus.PARTIALLY_AVAILABLE,
-                actor.userId(), everythingAvailable ? "Все позиции доступны" : "Доступна только часть");
+        RequestStatus target = everythingAvailable ? RequestStatus.APPROVED : RequestStatus.PARTIALLY_AVAILABLE;
+        String note = everythingAvailable ? "Все позиции доступны" : "Доступна только часть";
+        if (target == previous) {
+            // повторная проверка без смены статуса: количества обновлены, фиксируем в аудите
+            r.touch();
+            outbox.audit(SERVICE, "request.rechecked", "REQUEST", r.getId(), actor.userId(), details(
+                    "requestNumber", r.getNumber(),
+                    "status", target.name(),
+                    "approvedQuantity", total(r, RequestItem::getApprovedQuantity),
+                    "note", note));
+        } else {
+            transition(r, target, actor.userId(), note);
+        }
         log.info("AUDIT: проверка наличия по заявке {}: {}, кладовщик {}", r.getNumber(), r.getStatus(), actor.userId());
         return RequestMapper.toResponse(r);
     }
 
-    @Transactional
+    /**
+     * Отклонение кладовщиком (B6): из SUBMITTED, APPROVED и PARTIALLY_AVAILABLE, пока резерва нет.
+     * После резерва заявку можно только отменить. B5: осиротевший резерв снимается перед отклонением.
+     */
     public RequestResponse reject(UUID id, String reason, Actor actor) {
-        Request r = lockAny(id);
-        transition(r, RequestStatus.REJECTED, actor.userId(), reason.trim());
-        r.setStatusReason(reason.trim());
-        log.info("AUDIT: отклонена заявка {}, причина: {}, кладовщик {}", r.getNumber(), reason, actor.userId());
-        return RequestMapper.toResponse(r);
+        return ops.<RequestStatus, ReleaseResponse, RequestResponse>run(id, OPERATION_TTL,
+                r -> {
+                    if (!EnumSet.of(RequestStatus.SUBMITTED, RequestStatus.APPROVED, RequestStatus.PARTIALLY_AVAILABLE)
+                            .contains(r.getStatus())) {
+                        throw ApiException.conflict("REJECT_NOT_ALLOWED", "Отклонение недоступно в статусе " + r.getStatus());
+                    }
+                    return r.getStatus();
+                },
+                status -> releaseOrphanedReservation(id, status),
+                (r, status, released) -> {
+                    requireStatus(r, status);
+                    recordOrphanRelease(r, released, actor);
+                    transition(r, RequestStatus.REJECTED, actor.userId(), reason.trim());
+                    r.setStatusReason(reason.trim());
+                    log.info("AUDIT: отклонена заявка {}, причина: {}, кладовщик {}", r.getNumber(), reason, actor.userId());
+                    return RequestMapper.toResponse(r);
+                });
     }
+
+    private record ReservePlan(boolean partial, String number, UUID warehouseId, List<ReserveLine> lines,
+                               Map<UUID, BigDecimal> approvals) {}
 
     /**
      * Резервирование (разд. 11 ТЗ). Резерв создаёт inventory-service атомарно; здесь фиксируется результат.
      * APPROVED: всё или ничего. PARTIALLY_AVAILABLE: резервируется доступное (кладовщик может уменьшить количества).
+     * S2: вызов inventory идёт между двумя короткими транзакциями; резерв идемпотентен (ключ от заявки и количеств).
      */
-    @Transactional
     public RequestResponse reserve(UUID id, ReserveDto dto, Actor actor) {
-        Request r = lockAny(id);
+        return ops.<ReservePlan, Map<UUID, BigDecimal>, RequestResponse>run(id, OPERATION_TTL,
+                r -> prepareReserve(r, dto),
+                plan -> reserveInInventory(id, plan.number(), plan.warehouseId(), plan.lines(), plan.partial()),
+                (r, plan, reserved) -> finishReserve(r, plan, reserved, actor));
+    }
+
+    private ReservePlan prepareReserve(Request r, ReserveDto dto) {
         if (r.getStatus() != RequestStatus.APPROVED && r.getStatus() != RequestStatus.PARTIALLY_AVAILABLE) {
             throw ApiException.conflict("INVALID_STATUS", "Резервирование недоступно в статусе " + r.getStatus());
         }
         boolean partial = r.getStatus() == RequestStatus.PARTIALLY_AVAILABLE;
 
+        // Решение кладовщика проверяется сейчас, а в позиции записывается при фиксации результата
+        Map<UUID, BigDecimal> approvals = new HashMap<>();
         if (dto != null && dto.items() != null && !dto.items().isEmpty()) {
             if (!partial) {
                 throw ApiException.validation("Количества можно корректировать только при частичном обеспечении");
@@ -180,26 +267,34 @@ public class RequestService {
                 }
                 QuantityRules.require(item.getUnitCode(), item.isUnitAllowFractions(),
                         a.approvedQuantity(), "Позиция " + item.getLineNo());
-                item.setApprovedQuantity(a.approvedQuantity());
+                approvals.put(item.getId(), a.approvedQuantity());
             }
         }
-
-        List<ReserveLine> lines = r.getItems().stream()
-                .filter(i -> i.getApprovedQuantity() != null && i.getApprovedQuantity().signum() > 0)
-                .map(i -> new ReserveLine(i.getId(), i.getProductId(), i.getApprovedQuantity())).toList();
+        List<ReserveLine> lines = new ArrayList<>();
+        for (RequestItem i : r.getItems()) {
+            BigDecimal approved = approvals.containsKey(i.getId()) ? approvals.get(i.getId()) : i.getApprovedQuantity();
+            if (approved != null && approved.signum() > 0) {
+                lines.add(new ReserveLine(i.getId(), i.getProductId(), approved));
+            }
+        }
         if (lines.isEmpty()) {
             throw ApiException.conflict("NOTHING_TO_RESERVE", "Нет позиций к резервированию: отклоните заявку");
         }
+        return new ReservePlan(partial, r.getNumber(), r.getWarehouseId(), List.copyOf(lines), approvals);
+    }
 
-        Map<UUID, BigDecimal> reserved = reserveInInventory(r, lines, partial);
+    private RequestResponse finishReserve(Request r, ReservePlan plan, Map<UUID, BigDecimal> reserved, Actor actor) {
+        RequestStatus expected = plan.partial() ? RequestStatus.PARTIALLY_AVAILABLE : RequestStatus.APPROVED;
+        requireStatus(r, expected);
         BigDecimal total = reserved.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
         if (total.signum() <= 0) {
             throw ApiException.conflict("NOTHING_RESERVED", "Остатка для резерва нет: повторите проверку наличия или отклоните заявку");
         }
         for (RequestItem item : r.getItems()) {
+            if (plan.approvals().containsKey(item.getId())) item.setApprovedQuantity(plan.approvals().get(item.getId()));
             item.setReservedQuantity(reserved.getOrDefault(item.getId(), BigDecimal.ZERO));
         }
-        transition(r, partial ? RequestStatus.RESERVED_PARTIAL : RequestStatus.RESERVED, actor.userId(),
+        transition(r, plan.partial() ? RequestStatus.RESERVED_PARTIAL : RequestStatus.RESERVED, actor.userId(),
                 "Зарезервировано: " + total.stripTrailingZeros().toPlainString());
         log.info("AUDIT: резерв по заявке {} ({}), итого {}, кладовщик {}", r.getNumber(), r.getStatus(), total, actor.userId());
         return RequestMapper.toResponse(r);
@@ -207,34 +302,91 @@ public class RequestService {
 
     // ================= отмена и закрытие =================
 
+    private record CancelPlan(RequestStatus status, boolean release, List<ShortageMark> marks) {}
+
     /**
      * Отмена. Пользователь отменяет свою заявку до резерва (SUBMITTED, PARTIALLY_AVAILABLE, APPROVED);
      * кладовщик на любом этапе до выдачи, при этом резерв освобождается в inventory-service.
+     * Собранное не отменяется (ТЗ): из PICKED отмены нет, а из READY_FOR_ISSUE она разрешена только если
+     * по заявке ничего не собрано (выдавать нечего, иначе заявка зависла бы с резервом навсегда).
+     * S2: снятие резерва идёт между двумя короткими транзакциях; пока оно выполняется, по заявке не пройдёт
+     * ни сбор, ни другие операции (аренда), поэтому недобор в отметках не устареет.
      */
-    @Transactional
     public RequestResponse cancel(UUID id, String reason, Actor actor) {
-        Request r = actor.storekeeper() ? lockAny(id) : lockOwn(id, actor);
+        return ops.<CancelPlan, ReleaseResponse, RequestResponse>run(id, OPERATION_TTL,
+                r -> prepareCancel(r, actor),
+                plan -> plan.release() ? inventoryClient.release(id, plan.marks()) : null,
+                (r, plan, released) -> finishCancel(r, plan, released, reason, actor));
+    }
+
+    private CancelPlan prepareCancel(Request r, Actor actor) {
+        if (!actor.storekeeper() && !r.getRequesterId().equals(actor.userId())) {
+            throw ApiException.notFound("REQUEST_NOT_FOUND", "Заявка не найдена"); // чужая заявка не раскрывается
+        }
         Set<RequestStatus> allowed = actor.storekeeper()
                 ? EnumSet.of(RequestStatus.SUBMITTED, RequestStatus.APPROVED, RequestStatus.PARTIALLY_AVAILABLE,
                 RequestStatus.RESERVED, RequestStatus.RESERVED_PARTIAL, RequestStatus.PICKING,
-                RequestStatus.PICKING_WITH_SHORTAGE)
+                RequestStatus.PICKING_WITH_SHORTAGE, RequestStatus.READY_FOR_ISSUE)
                 : EnumSet.of(RequestStatus.SUBMITTED, RequestStatus.APPROVED, RequestStatus.PARTIALLY_AVAILABLE);
         if (!allowed.contains(r.getStatus())) {
             throw ApiException.conflict("CANCEL_NOT_ALLOWED", "Отмена недоступна в статусе " + r.getStatus());
         }
+        if (r.getStatus() == RequestStatus.READY_FOR_ISSUE && !nothingPicked(r.getId())) {
+            throw ApiException.conflict("CANCEL_NOT_ALLOWED",
+                    "Часть товара уже собрана: оформите выдачу, отмена недоступна");
+        }
         if (RESERVED_STATES.contains(r.getStatus())) {
-            // Сначала освобождаем резерв: если inventory недоступен, статус не меняется и состояние остаётся согласованным
-            inventoryClient.release(r.getId());
+            // B1: недобор, зафиксированный при сборе, передаётся в inventory: это недостача (на проверку), а не свободный остаток
+            List<PickingTask> tasks = pickingTaskRepository.findByRequestIdAndStatusIn(r.getId(),
+                    List.of(PickingTask.Status.NEW, PickingTask.Status.IN_PROGRESS, PickingTask.Status.COMPLETED));
+            return new CancelPlan(r.getStatus(), true, IssuingService.shortageMarks(tasks));
+        }
+        // B5: в APPROVED и PARTIALLY_AVAILABLE резерва быть не должно, но он мог остаться после сбоя
+        boolean orphanCapable = r.getStatus() == RequestStatus.APPROVED || r.getStatus() == RequestStatus.PARTIALLY_AVAILABLE;
+        return new CancelPlan(r.getStatus(), orphanCapable, List.of());
+    }
+
+    private RequestResponse finishCancel(Request r, CancelPlan plan, ReleaseResponse released, String reason, Actor actor) {
+        requireStatus(r, plan.status());
+        if (RESERVED_STATES.contains(r.getStatus())) {
             r.getItems().forEach(i -> i.setReservedQuantity(BigDecimal.ZERO));
+            List<String> toReturn = new ArrayList<>(); // S3: уже собранное физически лежит вне секций
             for (PickingTask t : pickingTaskRepository.findByRequestIdAndStatusIn(r.getId(),
                     List.of(PickingTask.Status.NEW, PickingTask.Status.IN_PROGRESS))) {
+                for (PickingItem pi : t.getItems()) {
+                    if (pi.getPickedQuantity() != null && pi.getPickedQuantity().signum() > 0) {
+                        toReturn.add(pi.getSectionCode() + " / " + pi.getRequestItem().getProductSku() + ": "
+                                + pi.getPickedQuantity().stripTrailingZeros().toPlainString());
+                    }
+                }
                 t.reject(); // открытое задание отклоняется, его работники снимаются
+                outbox.audit(SERVICE, "picking.task_rejected", "PICKING_TASK", t.getId(), actor.userId(), details(
+                        "taskNumber", t.getNumber(),
+                        "requestId", r.getId(),
+                        "requestNumber", r.getNumber(),
+                        "reason", reason.trim()));
             }
+            if (!toReturn.isEmpty()) {
+                log.warn("Заявка {} отменена после частичной сборки: нужно вернуть товар в секции: {}", r.getNumber(), toReturn);
+                outbox.audit(SERVICE, "picking.return_required", "REQUEST", r.getId(), actor.userId(), details(
+                        "requestNumber", r.getNumber(),
+                        "rows", toReturn.size(),
+                        "items", toReturn,
+                        "reason", reason.trim()));
+            }
+        } else {
+            recordOrphanRelease(r, released, actor);
         }
         transition(r, RequestStatus.CANCELLED, actor.userId(), reason.trim());
         r.setStatusReason(reason.trim());
         log.info("AUDIT: отменена заявка {}, причина: {}, инициатор {}", r.getNumber(), reason, actor.userId());
         return RequestMapper.toResponse(r);
+    }
+
+    /** По заявке (в завершённом задании комплектации) не собрано ни одной единицы. */
+    private boolean nothingPicked(UUID requestId) {
+        return pickingTaskRepository.pickedTotals(requestId, PickingTask.Status.COMPLETED).stream()
+                .noneMatch(t -> t.getPicked() != null && t.getPicked().signum() > 0);
     }
 
     /** Закрытие завершённой заявки (REJECTED, CANCELLED; ISSUED закрывается автоматически в части 5б). */
@@ -263,8 +415,18 @@ public class RequestService {
     @Transactional(readOnly = true)
     public PageResponse<RequestSummary> search(RequestStatus status, UUID warehouseId, UUID requesterId, String text,
                                                int page, int size, Actor actor) {
-        var pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100),
-                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id")));
+        return search(status, warehouseId, requesterId, text, page, size, RequestSort.NEWEST, actor);
+    }
+
+    /** M7: priority влияет на очередь при sort = PRIORITY (срочные выше, при равенстве раньше поданные). */
+    @Transactional(readOnly = true)
+    public PageResponse<RequestSummary> search(RequestStatus status, UUID warehouseId, UUID requesterId, String text,
+                                               int page, int size, RequestSort sort, Actor actor) {
+        Sort order = sort == RequestSort.PRIORITY
+                ? Sort.by(Sort.Order.desc("priority"), Sort.Order.asc("submittedAt").nullsLast(),
+                        Sort.Order.asc("createdAt"), Sort.Order.asc("id"))
+                : Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by("id"));
+        var pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 100), order);
         Specification<Request> spec = (root, query, cb) -> cb.conjunction();
         if (!actor.seesAll()) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("requesterId"), actor.userId()));
@@ -288,27 +450,28 @@ public class RequestService {
      * повтор того же действия после сбоя вернёт сохранённый ответ, а не второй резерв.
      * Если резерв уже создан (сбой после ответа inventory), подхватываем существующие резервы.
      */
-    private Map<UUID, BigDecimal> reserveInInventory(Request r, List<ReserveLine> lines, boolean partial) {
+    private Map<UUID, BigDecimal> reserveInInventory(UUID requestId, String number, UUID warehouseId,
+                                                     List<ReserveLine> lines, boolean partial) {
         try {
             ReserveResponse response = inventoryClient.reserve(
-                    new ReserveRequest(r.getId(), r.getWarehouseId(), partial, lines), idempotencyKey(r, lines, partial));
+                    new ReserveRequest(requestId, warehouseId, partial, lines), idempotencyKey(requestId, lines, partial));
             Map<UUID, BigDecimal> reserved = new HashMap<>();
             response.items().forEach(i -> reserved.put(i.requestItemId(), i.reserved()));
             return reserved;
         } catch (ApiException e) {
             if (!"RESERVATION_EXISTS".equals(e.getCode())) throw e;
             Map<UUID, BigDecimal> adopted = new HashMap<>();
-            for (ReservationDto d : inventoryClient.reservations(r.getId())) {
+            for (ReservationDto d : inventoryClient.reservations(requestId)) {
                 if ("ACTIVE".equals(d.status())) adopted.merge(d.requestItemId(), d.quantity(), BigDecimal::add);
             }
             if (adopted.isEmpty()) throw e;
-            log.warn("Резерв по заявке {} уже существовал в inventory: подхвачен без повторного создания", r.getNumber());
+            log.warn("Резерв по заявке {} уже существовал в inventory: подхвачен без повторного создания", number);
             return adopted;
         }
     }
 
-    private static String idempotencyKey(Request r, List<ReserveLine> lines, boolean partial) {
-        StringBuilder raw = new StringBuilder(r.getId().toString()).append('|').append(partial);
+    private static String idempotencyKey(UUID requestId, List<ReserveLine> lines, boolean partial) {
+        StringBuilder raw = new StringBuilder(requestId.toString()).append('|').append(partial);
         for (ReserveLine l : lines) {
             raw.append('|').append(l.requestItemId()).append(':').append(l.quantity().stripTrailingZeros().toPlainString());
         }
@@ -335,11 +498,27 @@ public class RequestService {
         h.setActorId(actorId);
         h.setComment(comment);
         historyRepository.save(h);
+        outbox.audit(SERVICE, "request.status_changed", "REQUEST", r.getId(), actorId, details(
+                "requestNumber", r.getNumber(),
+                "requesterId", r.getRequesterId(),
+                "warehouseId", r.getWarehouseId(),
+                "fromStatus", from.name(),
+                "newStatus", to.name(),
+                "actorId", actorId, // для уведомлений: не сообщать человеку о его же действии
+                "itemsCount", r.getItems().size(),
+                "requestedQuantity", total(r, RequestItem::getRequestedQuantity),
+                "approvedQuantity", total(r, RequestItem::getApprovedQuantity),
+                "reservedQuantity", total(r, RequestItem::getReservedQuantity),
+                "issuedQuantity", total(r, RequestItem::getIssuedQuantity),
+                "issueNumber", r.getIssueNumber(),
+                "createdAt", r.getCreatedAt() == null ? null : r.getCreatedAt().toString()));
     }
 
     private Request lockAny(UUID id) {
-        return requestRepository.findByIdForUpdate(id)
+        Request r = requestRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> ApiException.notFound("REQUEST_NOT_FOUND", "Заявка не найдена"));
+        ops.assertFree(id); // S2: пока идёт операция с внешним вызовом, остальные изменения по заявке отклоняются
+        return r;
     }
 
     /** Своя заявка (чужая выглядит как несуществующая) с блокировкой. */
@@ -382,9 +561,7 @@ public class RequestService {
     }
 
     /** Заменяет позиции. Сначала удаляем старые и сбрасываем в БД: иначе INSERT нового line_no опередит DELETE. */
-    private void fillItems(Request r, List<ItemInput> inputs) {
-        Map<UUID, Product> products = loadProducts(
-                inputs.stream().map(ItemInput::productId).collect(Collectors.toSet()));
+    private void fillItems(Request r, List<ItemInput> inputs, Map<UUID, Product> products) {
         r.getItems().clear();
         if (r.getId() != null) requestRepository.flush();
 
@@ -415,8 +592,38 @@ public class RequestService {
     @Transactional
     public RequestResponse readyForIssue(UUID id, String comment, Actor actor) {
         Request r = lockAny(id);
+        if ((r.getStatus() == RequestStatus.PICKED || r.getStatus() == RequestStatus.PICKING_WITH_SHORTAGE)
+                && nothingPicked(r.getId())) {
+            // иначе заявка попала бы в READY_FOR_ISSUE, из которого нечего выдавать
+            throw ApiException.conflict("NOTHING_PICKED", "Ничего не собрано: оформлять выдачу нечего, отмените заявку");
+        }
         transition(r, RequestStatus.READY_FOR_ISSUE, actor.userId(), blankToNull(comment));
         log.info("AUDIT: заявка {} готова к выдаче, кладовщик {}", r.getNumber(), actor.userId());
         return RequestMapper.toResponse(r);
+    }
+
+    /**
+     * B5: в статусах APPROVED и PARTIALLY_AVAILABLE резерва быть не должно, но он мог остаться в inventory, если резерв
+     * создан, а статус заявки сохранить не удалось (сбой, таймаут, перезапуск). Перед отменой или отклонением снимаем его
+     * (операция идемпотентна). Если inventory недоступен, операция не выполняется: осиротевший резерв остался бы навсегда.
+     * Вызывается между транзакциями (S2), поэтому работает с идентификатором, а не с сущностью.
+     */
+    private ReleaseResponse releaseOrphanedReservation(UUID requestId, RequestStatus status) {
+        if (status != RequestStatus.APPROVED && status != RequestStatus.PARTIALLY_AVAILABLE) {
+            return null;
+        }
+        return inventoryClient.release(requestId);
+    }
+
+    private void recordOrphanRelease(Request r, ReleaseResponse released, Actor actor) {
+        if (released == null || released.releasedReservations() <= 0) return;
+        log.warn("Заявка {}: снят осиротевший резерв ({} записей, {})", r.getNumber(),
+                released.releasedReservations(), released.releasedQuantity());
+        r.getItems().forEach(i -> i.setReservedQuantity(BigDecimal.ZERO));
+        outbox.audit(SERVICE, "request.orphan_reservation_released", "REQUEST", r.getId(), actor.userId(), details(
+                "requestNumber", r.getNumber(),
+                "status", r.getStatus().name(),
+                "releasedReservations", released.releasedReservations(),
+                "releasedQuantity", released.releasedQuantity()));
     }
 }

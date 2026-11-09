@@ -1,5 +1,6 @@
 server:
   port: 8085
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -7,7 +8,7 @@ spring:
   datasource:
     url: ${REQUEST_DB_URL:jdbc:postgresql://localhost:5433/request_db}
     username: ${DB_USER:warehouse}
-    password: ${DB_PASSWORD:warehouse}
+    password: ${DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -23,12 +24,30 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true   # опечатки в именах полей запроса дают 400
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:127.0.0.1:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      properties:
+        enable.idempotence: true
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+        max.block.ms: 5000
 
 app:
   security:
     jwt:
       secret: ${JWT_SECRET:}             # без значения по умолчанию; для разработки включите профиль dev
       issuer: warehouse-auth
+  idempotency:
+    # Шаблоны путей, где заголовок Idempotency-Key обязателен (фильтр применяется к POST, PUT, PATCH и DELETE).
+    # Точный путь без /** относится только к POST создания заявки: PATCH и DELETE идут на /api/v1/requests/{id}.
+    required-paths:
+      - /api/v1/requests
+    in-progress-timeout: 2m   # запись без «сердцебиения» дольше этого считается брошенной
+    retention: 24h
   services:
     catalog-url: ${CATALOG_SERVICE_URL:http://localhost:8082}
     warehouse-url: ${WAREHOUSE_SERVICE_URL:http://localhost:8083}
@@ -39,7 +58,11 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info   # metrics убраны: их никто не читает (при мониторинге вернуть и оставить доступ только ADMIN)
   endpoint:
     health:
       show-details: when-authorized
+
+wms:
+  outbox:
+    enabled: true

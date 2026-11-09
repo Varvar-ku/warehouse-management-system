@@ -6,25 +6,32 @@ import java.util.EnumSet;
 import java.util.Map;
 import java.util.Set;
 
-/** Статусы заявки и допустимые переходы (разд. 8 ТЗ плюс четыре добавленных, помечены «+»). */
+/**
+ * Статусы заявки и допустимые переходы (разд. 8 ТЗ плюс добавленные, помечены «+»).
+ * UNDER_REVIEW (B6) из модели убран: проверка наличия сразу даёт APPROVED или PARTIALLY_AVAILABLE.
+ * Константа осталась только потому, что в неизменяемой истории статусов есть старые записи с ней;
+ * переходов в неё и из неё нет.
+ */
 public enum RequestStatus {
-    DRAFT, SUBMITTED, UNDER_REVIEW, APPROVED, PARTIALLY_AVAILABLE, RESERVED, RESERVED_PARTIAL,
+    DRAFT, SUBMITTED, /** @deprecated только для старых записей истории */ @Deprecated UNDER_REVIEW, APPROVED, PARTIALLY_AVAILABLE, RESERVED, RESERVED_PARTIAL,
     PICKING, PICKED, PICKING_WITH_SHORTAGE, READY_FOR_ISSUE, ISSUED, REJECTED, CANCELLED, CLOSED;
 
     private static final Map<RequestStatus, Set<RequestStatus>> NEXT = new EnumMap<>(RequestStatus.class);
 
     static {
         NEXT.put(DRAFT, EnumSet.of(SUBMITTED));
-        NEXT.put(SUBMITTED, EnumSet.of(UNDER_REVIEW, CANCELLED));
-        NEXT.put(UNDER_REVIEW, EnumSet.of(APPROVED, PARTIALLY_AVAILABLE, REJECTED));
-        NEXT.put(APPROVED, EnumSet.of(RESERVED, CANCELLED /* + */, UNDER_REVIEW /* + повторная проверка */));
-        NEXT.put(PARTIALLY_AVAILABLE, EnumSet.of(RESERVED_PARTIAL, REJECTED, CANCELLED, UNDER_REVIEW /* + */));
+        NEXT.put(SUBMITTED, EnumSet.of(APPROVED, PARTIALLY_AVAILABLE, REJECTED /* + */, CANCELLED));
+        NEXT.put(APPROVED, EnumSet.of(RESERVED, PARTIALLY_AVAILABLE /* + повторная проверка */,
+                REJECTED /* + */, CANCELLED /* + */));
+        NEXT.put(PARTIALLY_AVAILABLE, EnumSet.of(RESERVED_PARTIAL, APPROVED /* + повторная проверка */,
+                REJECTED, CANCELLED));
         NEXT.put(RESERVED, EnumSet.of(PICKING, CANCELLED /* + */));
         NEXT.put(RESERVED_PARTIAL, EnumSet.of(PICKING, CANCELLED));
         NEXT.put(PICKING, EnumSet.of(PICKED, PICKING_WITH_SHORTAGE, CANCELLED));
-        NEXT.put(PICKED, EnumSet.of(READY_FOR_ISSUE));
-        NEXT.put(PICKING_WITH_SHORTAGE, EnumSet.of(READY_FOR_ISSUE, CANCELLED));
-        NEXT.put(READY_FOR_ISSUE, EnumSet.of(ISSUED));
+        // + PICKING: возврат в сборку при исправлении ошибочного ввода (переоткрытие строки, S3), пока не «готово к выдаче»
+        NEXT.put(PICKED, EnumSet.of(READY_FOR_ISSUE, PICKING));
+        NEXT.put(PICKING_WITH_SHORTAGE, EnumSet.of(READY_FOR_ISSUE, CANCELLED, PICKING));
+        NEXT.put(READY_FOR_ISSUE, EnumSet.of(ISSUED, CANCELLED /* только если ничего не собрано, проверяется в RequestService.cancel */));
         NEXT.put(ISSUED, EnumSet.of(CLOSED));
         NEXT.put(REJECTED, EnumSet.of(CLOSED));
         NEXT.put(CANCELLED, EnumSet.of(CLOSED));
