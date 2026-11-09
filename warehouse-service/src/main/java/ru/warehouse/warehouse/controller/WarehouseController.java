@@ -8,6 +8,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import ru.warehouse.warehouse.dto.WarehouseDtos.*;
 import ru.warehouse.warehouse.service.WarehouseService;
+import ru.warehouse.warehouse.service.WarehouseUsageGuard;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,6 +18,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WarehouseController {
     private final WarehouseService warehouseService;
+    private final WarehouseUsageGuard usageGuard;
 
     @GetMapping
     public List<WarehouseResponse> list() {
@@ -38,6 +40,9 @@ public class WarehouseController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public WarehouseResponse update(@PathVariable UUID id, @Valid @RequestBody WarehouseUpdateRequest request) {
+        if (Boolean.FALSE.equals(request.active()) && warehouseService.get(id).active()) {
+            usageGuard.assertCanDeactivate(id); // M4: остатки и открытые документы, до транзакции изменения
+        }
         return warehouseService.update(id, request);
     }
 }

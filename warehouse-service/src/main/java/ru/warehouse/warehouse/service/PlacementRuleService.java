@@ -34,6 +34,7 @@ public class PlacementRuleService {
     private final SectionRepository sectionRepository;
     private final UnitConverter units;
     private final JsonMapper jsonMapper; // бин Spring Boot 4 (Jackson 3)
+    private final WarehouseAudit audit;
 
     @Transactional
     public RuleResponse create(RuleRequest req, UUID actorId) {
@@ -47,7 +48,8 @@ public class PlacementRuleService {
         r.setTargetSection(requireTarget(req.targetSectionId()));
         r = ruleRepository.save(r);
         recordVersion(r, req.conditions(), actorId); // версия 1
-        log.info("AUDIT: создано правило размещения «{}» ({}), инициатор {}", r.getName(), r.getId(), actorId);
+        audit.record("placement_rule.created", "PLACEMENT_RULE", r.getId(), "name", r.getName(),
+                "priority", r.getPriority(), "fallback", r.isFallback(), "targetSectionId", r.getTargetSection().getId());
         return toResponse(r);
     }
 
@@ -124,8 +126,9 @@ public class PlacementRuleService {
             r.setRuleVersion(r.getRuleVersion() + 1); // каждое изменение = новая версия
             r.touch();
             recordVersion(r, effective, actorId);
-            log.info("AUDIT: изменено правило «{}» ({}), версия {}, инициатор {}",
-                    r.getName(), r.getId(), r.getRuleVersion(), actorId);
+            audit.record("placement_rule.updated", "PLACEMENT_RULE", r.getId(), "name", r.getName(),
+                    "version", r.getRuleVersion(), "active", r.isActive(), "priority", r.getPriority(),
+                    "targetSectionId", r.getTargetSection().getId());
         }
         return toResponse(r);
     }

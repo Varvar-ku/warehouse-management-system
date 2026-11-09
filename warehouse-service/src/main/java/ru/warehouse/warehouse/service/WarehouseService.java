@@ -21,6 +21,7 @@ import java.util.UUID;
 public class WarehouseService {
     private final WarehouseRepository warehouseRepository;
     private final SectionRepository sectionRepository;
+    private final WarehouseAudit audit;
 
     @Transactional
     public WarehouseResponse create(WarehouseRequest req) {
@@ -43,7 +44,7 @@ public class WarehouseService {
         zone.setUnassignedZone(true);
         sectionRepository.save(zone);
 
-        log.info("AUDIT: создан склад {} ({})", w.getCode(), w.getId());
+        audit.record("warehouse.created", "WAREHOUSE", w.getId(), "code", w.getCode(), "name", w.getName());
         return toResponse(w);
     }
 
@@ -60,11 +61,13 @@ public class WarehouseService {
     @Transactional
     public WarehouseResponse update(UUID id, WarehouseUpdateRequest req) {
         Warehouse w = find(id);
+        boolean wasActive = w.isActive();
         if (req.name() != null) w.setName(req.name().trim());
         if (req.address() != null) w.setAddress(blankToNull(req.address()));
         if (req.active() != null) w.setActive(req.active());
         w.touch();
-        log.info("AUDIT: изменён склад {} ({})", w.getCode(), w.getId());
+        audit.record("warehouse.updated", "WAREHOUSE", w.getId(), "code", w.getCode(), "name", w.getName(),
+                "wasActive", wasActive, "active", w.isActive());
         return toResponse(w);
     }
 

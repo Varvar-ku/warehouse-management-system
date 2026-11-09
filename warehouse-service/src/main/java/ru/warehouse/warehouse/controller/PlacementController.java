@@ -7,6 +7,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import ru.warehouse.warehouse.placement.PlacementModels.PlacementRequest;
 import ru.warehouse.warehouse.placement.PlacementModels.PlacementResult;
+import ru.warehouse.warehouse.placement.PlacementModels.SectionFit;
+import ru.warehouse.warehouse.placement.PlacementModels.ValidateRequest;
 import ru.warehouse.warehouse.service.PlacementService;
 import java.util.List;
 
@@ -25,5 +27,15 @@ public class PlacementController {
     @PreAuthorize("hasRole('STOREKEEPER')")
     public List<PlacementResult> recommend(@Valid @RequestBody PlacementRequest request) {
         return placementService.recommend(request);
+    }
+
+    /**
+     * Подходит ли секция позиции. Нужен работнику склада при подтверждении размещения
+     * (inventory-service пересылает его JWT), поэтому роль шире, чем у recommend. Ничего не сохраняет.
+     */
+    @PostMapping("/validate")
+    @PreAuthorize("hasAnyRole('STOREKEEPER', 'WAREHOUSE_WORKER')")
+    public SectionFit validate(@Valid @RequestBody ValidateRequest request) {
+        return placementService.validate(request);
     }
 }

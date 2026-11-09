@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 import ru.warehouse.common.dto.PageResponse;
 import ru.warehouse.warehouse.dto.WarehouseDtos.*;
 import ru.warehouse.warehouse.entity.SectionStatus;
+import ru.warehouse.warehouse.service.SectionConstraintsValidator;
 import ru.warehouse.warehouse.service.SectionService;
 import java.util.UUID;
 
@@ -17,8 +18,10 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SectionController {
     private final SectionService sectionService;
+    private final SectionConstraintsValidator constraintsValidator;
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('STOREKEEPER', 'ADMIN', 'WAREHOUSE_WORKER')")
     public PageResponse<SectionResponse> search(
             @RequestParam(required = false) UUID warehouseId,
             @RequestParam(required = false) SectionStatus status,
@@ -36,10 +39,12 @@ public class SectionController {
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('ADMIN')")
     public SectionResponse create(@Valid @RequestBody CreateSectionRequest request) {
+        constraintsValidator.validate(request.constraints()); // M5: до транзакции
         return sectionService.create(request);
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('STOREKEEPER', 'ADMIN', 'WAREHOUSE_WORKER')")
     public SectionResponse get(@PathVariable UUID id) {
         return sectionService.get(id);
     }
@@ -47,6 +52,7 @@ public class SectionController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     public SectionResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateSectionRequest request) {
+        constraintsValidator.validate(request.constraints()); // M5: до транзакции
         return sectionService.update(id, request);
     }
 }

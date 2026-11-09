@@ -48,6 +48,15 @@ public final class PlacementModels {
             @NotEmpty @Size(max = 200) List<@Valid PlacementItem> items,
             List<@Valid SectionOccupancy> occupancy) {}
 
+    /** Проверка одной секции для одной позиции (подтверждение размещения). */
+    public record ValidateRequest(
+            @NotNull UUID warehouseId,
+            @NotNull UUID sectionId,
+            @NotNull @Valid PlacementItem item) {}
+
+    /** fits = false: reason объясняет, чем секция не подходит. */
+    public record SectionFit(boolean fits, String reason) {}
+
     public enum PlacementStatus { ASSIGNED, UNASSIGNED }
 
     /** Как выбрана секция. */

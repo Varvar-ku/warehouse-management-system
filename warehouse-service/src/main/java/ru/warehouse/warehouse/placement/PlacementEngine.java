@@ -129,6 +129,20 @@ public class PlacementEngine {
         }
     }
 
+    /**
+     * Подходит ли секция позиции (для подтверждения размещения работником): статус, тип, материал, размеры,
+     * единица и предельная вместимость пустой секции. Текущую занятость здесь не учитываем:
+     * её проверяет inventory-service под блокировкой секции. Возвращает причину отказа или null.
+     */
+    public String violationFor(SectionView section, PlacementItem item) {
+        Ctx ctx = new Ctx(List.of(section), List.of(), OffsetDateTime.now());
+        try {
+            return violation(section, item, ctx);
+        } catch (UnknownUnitException ex) {
+            return ex.getMessage();
+        }
+    }
+
     // ================= жёсткие ограничения =================
 
     private String targetViolation(SectionView target, PlacementItem item, Ctx ctx) {

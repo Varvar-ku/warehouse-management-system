@@ -3,13 +3,19 @@ package ru.warehouse.warehouse.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.warehouse.common.dto.PageResponse;
+import ru.warehouse.common.event.OutboxPublisher;
+import ru.warehouse.common.event.SectionStatusEvent;
 import ru.warehouse.common.exception.ApiException;
+import ru.warehouse.warehouse.client.InventoryClient;
 import ru.warehouse.warehouse.dto.WarehouseDtos.*;
 import ru.warehouse.warehouse.entity.Section;
 import ru.warehouse.warehouse.entity.SectionStatus;
@@ -33,6 +39,10 @@ public class SectionService {
     private final SectionRepository sectionRepository;
     private final WarehouseRepository warehouseRepository;
     private final PlacementRuleRepository ruleRepository;
+    private final InventoryClient inventoryClient;
+    private final WarehouseAudit audit;
+    /** Необязательный: пока outbox не подключён к сервису, статус меняется, но inventory о блокировке не узнает (пишем ошибку в лог). */
+    private final ObjectProvider<OutboxPublisher> outbox;
 
     @Transactional
     public SectionResponse create(CreateSectionRequest req) {
@@ -55,7 +65,8 @@ public class SectionService {
         s.setPriority(req.priority() == null ? 0 : req.priority());
         applyConstraints(s, req.constraints());
         s = sectionRepository.save(s);
-        log.info("AUDIT: создана секция {} в складе {} ({})", s.getCode(), w.getCode(), s.getId());
+        audit.record("section.created", "SECTION", s.getId(), "code", s.getCode(), "warehouse", w.getCode(),
+                "name", s.getName());
         return toResponse(s);
     }
 
@@ -119,7 +130,8 @@ public class SectionService {
         }
         if (req.status() != null) changeStatus(s, req.status());
         s.touch();
-        log.info("AUDIT: изменена секция {} ({})", s.getCode(), s.getId());
+        audit.record("section.updated", "SECTION", s.getId(), "code", s.getCode(), "name", s.getName(),
+                "status", s.getStatus().name(), "constraintsChanged", req.constraints() != null);
         return toResponse(s);
     }
 
@@ -147,8 +159,41 @@ public class SectionService {
             throw ApiException.conflict("SECTION_USED_BY_RULE",
                     "Секция указана как цель активного правила размещения: сначала отключите правило");
         }
-        // TODO этап 4: для BLOCKED и ARCHIVED проверить остатки и открытые задания в inventory-service
+        // Блокировка с остатком допустима (она закрывает приём и резерв), архивация нет
+        if (target == SectionStatus.ARCHIVED) {
+            InventoryClient.SectionUsage usage = inventoryClient.sectionUsage(s.getId());
+            if (usage.inUse()) {
+                throw ApiException.conflict("SECTION_NOT_EMPTY",
+                        "В секции есть остаток или незавершённые размещения: архивировать нельзя. "
+                                + "Заблокируйте секцию или сначала освободите её");
+            }
+        }
         s.setStatus(target);
+        audit.record("section.status_changed", "SECTION", s.getId(), "code", s.getCode(),
+                "from", current.name(), "to", target.name());
+        publishStatus(s);
+    }
+
+    /** Событие уходит через outbox в той же транзакции, что и смена статуса. */
+    private void publishStatus(Section s) {
+        OutboxPublisher publisher = outbox.getIfAvailable();
+        if (publisher == null) {
+            log.error("OutboxPublisher не подключён: событие о статусе секции {} не отправлено", s.getId());
+            return;
+        }
+        publisher.publishSectionStatus(SectionStatusEvent.of(
+                s.getId(), s.getWarehouse().getId(), s.getCode(), s.getStatus().name(), currentActor()));
+    }
+
+    private static UUID currentActor() {
+        if (SecurityContextHolder.getContext().getAuthentication() instanceof JwtAuthenticationToken jwt) {
+            try {
+                return UUID.fromString(jwt.getToken().getSubject());
+            } catch (IllegalArgumentException | NullPointerException ex) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void applyConstraints(Section s, SectionConstraints c) {

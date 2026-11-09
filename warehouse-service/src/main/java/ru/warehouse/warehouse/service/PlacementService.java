@@ -17,6 +17,8 @@ import ru.warehouse.warehouse.placement.PlacementEngine.RuleView;
 import ru.warehouse.warehouse.placement.PlacementEngine.SectionView;
 import ru.warehouse.warehouse.placement.PlacementModels.PlacementRequest;
 import ru.warehouse.warehouse.placement.PlacementModels.PlacementResult;
+import ru.warehouse.warehouse.placement.PlacementModels.SectionFit;
+import ru.warehouse.warehouse.placement.PlacementModels.ValidateRequest;
 import ru.warehouse.warehouse.placement.RuleConditions;
 import ru.warehouse.warehouse.repository.PlacementRuleRepository;
 import ru.warehouse.warehouse.repository.SectionRepository;
@@ -59,6 +61,24 @@ public class PlacementService {
 
         return engine.calculate(sections, rules, req.items(),
                 req.occupancy() == null ? List.of() : req.occupancy(), OffsetDateTime.now());
+    }
+
+    /**
+     * Подходит ли конкретная секция позиции. Зону «Нераспределено» не проверяем: туда можно только
+     * по решению кладовщика, это контролирует inventory-service.
+     */
+    @Transactional(readOnly = true)
+    public SectionFit validate(ValidateRequest req) {
+        Section s = sectionRepository.findById(req.sectionId())
+                .orElseThrow(() -> ApiException.notFound("SECTION_NOT_FOUND", "Секция не найдена"));
+        if (!s.getWarehouse().getId().equals(req.warehouseId())) {
+            throw ApiException.validation("Секция принадлежит другому складу");
+        }
+        if (s.isUnassignedZone()) {
+            return new SectionFit(true, null);
+        }
+        String reason = engine.violationFor(toView(s), req.item());
+        return new SectionFit(reason == null, reason);
     }
 
     private static SectionView toView(Section s) {

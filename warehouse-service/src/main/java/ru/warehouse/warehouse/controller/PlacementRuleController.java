@@ -21,6 +21,7 @@ public class PlacementRuleController {
     private final PlacementRuleService ruleService;
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('STOREKEEPER', 'ADMIN')")
     public PageResponse<RuleResponse> search(@RequestParam(required = false) UUID warehouseId,
                                              @RequestParam(required = false) Boolean active,
                                              @RequestParam(required = false) Boolean fallback,
@@ -37,6 +38,7 @@ public class PlacementRuleController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('STOREKEEPER', 'ADMIN')")
     public RuleResponse get(@PathVariable UUID id) {
         return ruleService.get(id);
     }
@@ -50,6 +52,7 @@ public class PlacementRuleController {
 
     /** История версий правила (от новой к старой). */
     @GetMapping("/{id}/versions")
+    @PreAuthorize("hasAnyRole('STOREKEEPER', 'ADMIN')")
     public List<RuleVersionResponse> versions(@PathVariable UUID id) {
         return ruleService.versions(id);
     }
