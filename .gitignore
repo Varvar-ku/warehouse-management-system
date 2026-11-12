@@ -51,3 +51,9 @@ Thumbs.db
 ### Stray npm files in the repository root (frontend has its own) ###
 /package-lock.json
 /package.json
+
+# ключи подписи JWT и любые закрытые ключи
+*.pem
+*.key
+*.p12
+*.jks

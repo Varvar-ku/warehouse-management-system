@@ -55,12 +55,30 @@ public class StockPostingService {
     public PlacementItem placementItemFor(UUID taskId, UUID itemId, BigDecimal quantity) {
         PlacementTask task = findTask(taskId);
         ReceiptItem item = findItem(task.getReceipt(), itemId);
+        return buildPlacementItem(item, quantity == null ? item.getQuantity() : quantity);
+    }
+
+    /**
+     * То же для решения ACCEPT_ACTUAL: проверяется фактическое размещение (фактическое количество, а не плановое).
+     * Вызывается до транзакции проведения.
+     */
+    @Transactional(readOnly = true)
+    public PlacementItem placementItemForPlaced(UUID taskId, UUID itemId) {
+        PlacementTask task = findTask(taskId);
+        ReceiptItem item = findItem(task.getReceipt(), itemId);
+        if (item.getPlacedQuantity() == null) {
+            throw ApiException.conflict("ITEM_NOT_IN_DISCREPANCY", "Позиция не в статусе расхождения");
+        }
+        return buildPlacementItem(item, item.getPlacedQuantity());
+    }
+
+    private PlacementItem buildPlacementItem(ReceiptItem item, BigDecimal quantity) {
         if (item.getSnapshotJson() == null) {
             throw ApiException.conflict("ITEM_NOT_PREPARED", "Позиция не подготовлена к размещению");
         }
         try {
             BatchSnapshot snapshot = jsonMapper.readValue(item.getSnapshotJson(), BatchSnapshot.class);
-            return PlacementItemFactory.fromSnapshot(item, snapshot, quantity == null ? item.getQuantity() : quantity);
+            return PlacementItemFactory.fromSnapshot(item, snapshot, quantity);
         } catch (JacksonException ex) {
             log.error("Повреждён snapshot_json позиции {}", item.getId(), ex);
             throw ApiException.conflict("ITEM_CORRUPTED", "Снимок позиции повреждён");
@@ -107,7 +125,7 @@ public class StockPostingService {
         boolean exact = section.id().equals(item.getTargetSectionId())
                 && quantity.compareTo(item.getQuantity()) == 0;
         if (exact) {
-            post(r, item, workerId, comment);
+            post(r, item, workerId, comment, section);
         } else {
             // Расхождение: остаток НЕ меняется, решение за кладовщиком (разд. 10 ТЗ)
             if (comment == null || comment.isBlank()) {
@@ -156,8 +174,17 @@ public class StockPostingService {
         String note = req.comment().trim();
         switch (req.decision()) {
             case ACCEPT_ACTUAL -> {
+                // Между размещением работником и решением кладовщика секцию могли заблокировать, заархивировать
+                // или изменить её правила: все проверки повторяются на актуальном SectionInfo (B2/B3).
+                if (placedSection == null || !placedSection.id().equals(item.getPlacedSectionId())) {
+                    throw ApiException.conflict("ITEM_CHANGED", "Размещение позиции изменилось, повторите операцию");
+                }
+                if (!placedSection.warehouseId().equals(r.getWarehouseId())) {
+                    throw ApiException.validation("Секция принадлежит другому складу");
+                }
+                SectionRules.requirePlaceable(placedSection, item.getTargetDecision());
                 requireCapacity(placedSection, item, item.getPlacedQuantity()); // место могли занять после расхождения
-                post(r, item, storekeeperId, "Решение кладовщика: " + note);
+                post(r, item, storekeeperId, "Решение кладовщика: " + note, placedSection);
             }
             case REJECT_LINE -> {
                 item.setPlacedSectionId(null);
@@ -241,7 +268,7 @@ public class StockPostingService {
     }
 
     /** Партия + остаток + движение RECEIPT: всё в текущей транзакции. */
-    private void post(Receipt r, ReceiptItem item, UUID performedBy, String comment) {
+    private void post(Receipt r, ReceiptItem item, UUID performedBy, String comment, SectionInfo section) {
         BigDecimal quantity = item.getPlacedQuantity();
         OffsetDateTime now = OffsetDateTime.now();
 
@@ -286,6 +313,7 @@ public class StockPostingService {
             stock.setSectionId(item.getPlacedSectionId());
             stock.setSectionCode(item.getPlacedSectionCode());
             stock.setUnassignedZone(item.isPlacedUnassignedZone()); // из "Нераспределено" резервировать нельзя
+            stock.setSectionBlocked(SectionRules.blocksReservation(section)); // статус секции на момент проведения
             stock.setBatch(batch);
             stock.setUnitCode(item.getUnitCode());
             stock.setQuantity(quantity);

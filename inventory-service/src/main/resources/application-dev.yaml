@@ -1,7 +1,6 @@
-spring:
-  datasource:
-    password: ${DB_PASSWORD:warehouse}
 app:
   security:
     jwt:
-      secret: ${JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}
+      generate-if-missing: true      # auth-service: если файла ключа нет, создать при старте (только локальная разработка)
+    service-token:
+      generate-if-missing: true      # request-service: то же для ключа служебных токенов

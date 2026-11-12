@@ -60,6 +60,8 @@ export default function PickingTaskPage() {
   const active = isTaskActive(t);
   const me = t.workers.find((w) => w.workerId === user?.id);
   const canAccept = active && me?.status === 'ASSIGNED';
+  // Собирать можно только после «Принять»: пока статус ASSIGNED, ввод закрыт (бэкенд тоже откажет: TASK_NOT_ACCEPTED)
+  const awaitingAccept = canAccept;
   const progress = t.progress;
   const percent = Math.round(Number(progress?.percent ?? 0));
 
@@ -107,7 +109,9 @@ export default function PickingTaskPage() {
       {rows.length === 0 ? (
         <Empty description={search ? 'Ничего не найдено' : 'Для вас нет строк в этом задании'} />
       ) : (
-        rows.map((item) => <PickRowCard key={item.id} taskId={t.id} item={item} editable={active} />)
+        rows.map((item) => (
+          <PickRowCard key={item.id} taskId={t.id} item={item} editable={active && !awaitingAccept} awaitingAccept={awaitingAccept} />
+        ))
       )}
     </Space>
   );

@@ -7,8 +7,8 @@ spring:
     name: warehouse-service
   datasource:
     url: ${WAREHOUSE_DB_URL:jdbc:postgresql://localhost:5433/warehouse_db}
-    username: ${DB_USER:warehouse}
-    password: ${DB_PASSWORD}
+    username: ${WAREHOUSE_DB_USER:warehouse_app}
+    password: ${WAREHOUSE_DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -32,6 +32,10 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # P1-9: миграции выполняет владелец БД (warehouse_owner), приложение работает под ролью warehouse_app.
+    # Если переменные не заданы (например, в тестах), берутся учётные данные datasource.
+    user: ${WAREHOUSE_MIGRATION_USER:${spring.datasource.username}}
+    password: ${WAREHOUSE_MIGRATION_PASSWORD:${spring.datasource.password}}
   jackson:
     deserialization:
       # Строгий режим: опечатка в имени поля (например, "materal" в условиях правила) иначе молча
@@ -41,7 +45,8 @@ spring:
 app:
   security:
     jwt:
-      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен
+      jwks-uri: ${AUTH_JWKS_URI:${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json}   # P2-11: публичные ключи auth-service (RS256), общего секрета больше нет
+      audience: warehouse-api
       issuer: warehouse-auth
 
 wms:

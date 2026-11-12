@@ -30,6 +30,7 @@ public class UserService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthAudit audit;
+    private final RefreshTokenService refreshTokens;
 
     /** Запрещённые сочетания ролей (разделение обязанностей), формат «РОЛЬ+РОЛЬ». Задаётся app.security.forbidden-role-combinations. */
     @org.springframework.beans.factory.annotation.Value("${app.security.forbidden-role-combinations:USER+STOREKEEPER,STOREKEEPER+ADMIN}")
@@ -96,6 +97,12 @@ public class UserService {
             throw ApiException.conflict("LAST_ADMIN", "Нельзя отключить или лишить роли последнего администратора");
         }
         user.touch();
+        // P1-8: блокировка или смена ролей завершает все сессии (refresh-токены); уже выданный access-токен
+        // действует не дольше своего короткого срока
+        boolean disabled = activeBefore && !user.isActive();
+        if (disabled || !rolesBefore.equals(roleCodes(user))) {
+            refreshTokens.revokeAllForUser(user.getId(), disabled ? "ACCOUNT_DISABLED" : "ROLES_CHANGED");
+        }
         List<String> changed = new ArrayList<>();
         if (req.fullName() != null) changed.add("fullName");
         if (req.email() != null) changed.add("email");
@@ -127,6 +134,7 @@ public class UserService {
         User user = find(id);
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.touch();
+        refreshTokens.revokeAllForUser(user.getId(), "PASSWORD_RESET");   // P1-8
         audit.record("user.password_reset", "USER", user.getId(), actorId, "login", user.getLogin());
     }
 
@@ -139,6 +147,7 @@ public class UserService {
         validatePassword(req.newPassword());
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         user.touch();
+        refreshTokens.revokeAllForUser(user.getId(), "PASSWORD_CHANGED");   // P1-8
         audit.record("user.password_changed", "USER", user.getId(), userId, "login", user.getLogin());
     }
 

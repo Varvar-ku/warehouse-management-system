@@ -1,21 +1,34 @@
 package ru.warehouse.auth.service;
 
-import lombok.RequiredArgsConstructor;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.*;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
 import ru.warehouse.auth.entity.Role;
 import ru.warehouse.auth.entity.User;
 import ru.warehouse.common.security.JwtProperties;
+import ru.warehouse.common.security.SigningKey;
 import java.time.Instant;
 import java.util.List;
 
-/** Выпуск access-токена. Другие сервисы проверяют его по тому же секрету. */
+/**
+ * Выпуск access-токена (P2-11: RS256, audience). Другие сервисы проверяют его публичным ключом из JWKS auth-service
+ * (GET /.well-known/jwks.json), приватный ключ есть только здесь.
+ */
 @Service
-@RequiredArgsConstructor
 public class TokenService {
     private final JwtEncoder encoder;
+    private final SigningKey key;
     private final JwtProperties props;
+
+    public TokenService(@Qualifier("userTokenSigningKey") SigningKey key, JwtProperties props) {
+        this.key = key;
+        this.encoder = key.encoder();
+        this.props = props;
+    }
 
     public record IssuedToken(String value, long expiresInSeconds) {}
 
@@ -27,13 +40,14 @@ public class TokenService {
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
                 .issuer(props.issuer())
-                .subject(user.getId().toString())   // sub = id пользователя
+                .audience(List.of(props.audience()))   // получатель: сервисы WMS; токен для другого получателя отклоняется
+                .subject(user.getId().toString())      // sub = id пользователя
                 .issuedAt(now)
                 .expiresAt(expires)
                 .claim("login", user.getLogin())
-                .claim("roles", roleCodes)          // из этого claim сервисы строят ROLE_*
+                .claim("roles", roleCodes)             // из этого claim сервисы строят ROLE_*
                 .build();
-        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
+        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(key.keyId()).build();
         String token = encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
         return new IssuedToken(token, props.ttl().toSeconds());
     }

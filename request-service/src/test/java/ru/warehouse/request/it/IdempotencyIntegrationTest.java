@@ -210,7 +210,7 @@ class IdempotencyIntegrationTest extends IntegrationTestBase {
         send(userToken, key, PATH, "{\"x\":1}");
         // имитация падения процесса: запрос выполнился, а ответ не сохранён и «сердцебиения» давно нет
         jdbc.update("UPDATE idempotency_keys SET status = 'IN_PROGRESS', response_status = NULL, response_body = NULL, "
-                + "completed_at = NULL, locked_at = now() - interval '1 hour' WHERE idem_key = ?", key);
+                + "completed_at = NULL, created_at = now() - interval '1 hour' WHERE idempotency_key = ?", key);
 
         MockHttpServletResponse retry = send(userToken, key, PATH, "{\"x\":1}");
 

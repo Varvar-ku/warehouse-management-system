@@ -1,0 +1,14 @@
+/* Заметная обводка фокуса для работы с клавиатурой (стрелки, Tab). Только при навигации клавиатурой, мышью не мешает. */
+:focus-visible {
+  outline: 3px solid #1677ff;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Поля Ant Design уже подсвечивают фокус рамкой: двойную обводку не рисуем */
+.ant-input:focus-visible,
+.ant-input-number-input:focus-visible,
+.ant-select-selection-search-input:focus-visible,
+.ant-picker-input > input:focus-visible {
+  outline: none;
+}

@@ -31,6 +31,11 @@ public final class SectionRules {
         }
     }
 
+    /** Значение stock.section_blocked для новой строки остатка: секция не ACTIVE, резервировать из неё нельзя. */
+    public static boolean blocksReservation(SectionInfo section) {
+        return section == null || !"ACTIVE".equalsIgnoreCase(section.status());
+    }
+
     /** Решение кладовщика при возврате в размещение: новая целевая секция проходит ту же проверку. */
     public static TargetDecision decisionForNewTarget(SectionInfo section) {
         requirePlaceable(section, section.unassignedZone() ? TargetDecision.UNASSIGNED_ZONE : TargetDecision.ALTERNATIVE);

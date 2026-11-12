@@ -19,8 +19,4 @@ public class AuthConfig {
     PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
-    @Bean
-    JwtEncoder jwtEncoder(JwtProperties props, Environment env) {
-        return new NimbusJwtEncoder(new ImmutableSecret<>(JwtKeys.secretKey(props, env)));
-    }
 }

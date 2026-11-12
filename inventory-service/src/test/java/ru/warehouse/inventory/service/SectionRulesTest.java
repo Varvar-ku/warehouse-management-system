@@ -42,4 +42,20 @@ class SectionRulesTest {
         assertEquals(TargetDecision.UNASSIGNED_ZONE, SectionRules.decisionForNewTarget(section("ACTIVE", true)));
         assertThrows(ApiException.class, () -> SectionRules.decisionForNewTarget(section("BLOCKED", false)));
     }
+
+    @Test
+    void blocksReservationUnlessSectionIsActive() {
+        assertEquals(false, SectionRules.blocksReservation(section("ACTIVE", false)));
+        assertEquals(true, SectionRules.blocksReservation(section("BLOCKED", false)));
+        assertEquals(true, SectionRules.blocksReservation(section("ARCHIVED", false)));
+    }
+
+    /** ACCEPT_ACTUAL использует те же правила: заблокированная после размещения секция принять товар не может. */
+    @Test
+    void acceptActualRecheckUsesSameRules() {
+        assertThrows(ApiException.class,
+                () -> SectionRules.requirePlaceable(section("BLOCKED", false), TargetDecision.RECOMMENDED));
+        assertThrows(ApiException.class,
+                () -> SectionRules.requirePlaceable(section("ACTIVE", true), TargetDecision.ALTERNATIVE));
+    }
 }

@@ -43,7 +43,10 @@ export interface PlacementTask {
   receiptNumber: string;
   warehouseId: string;
   status: string;
+  /** Первый из исполнителей (поле оставлено для совместимости). */
   assigneeId: string | null;
+  /** Исполнители размещения; пусто: задание видят все работники склада. */
+  workerIds: string[];
   createdAt: string;
   completedAt: string | null;
   items: PlacementItem[];

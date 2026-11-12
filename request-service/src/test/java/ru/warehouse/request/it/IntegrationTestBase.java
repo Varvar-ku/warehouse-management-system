@@ -57,7 +57,9 @@ public abstract class IntegrationTestBase {
                 + postgres.getMappedPort(5432) + "/test");
         registry.add("spring.datasource.username", () -> "test");
         registry.add("spring.datasource.password", () -> "test");
-        registry.add("app.security.jwt.secret", () -> TestTokens.SECRET);
+        // P2-11: RS256, test key pair from TestTokens
+        registry.add("app.security.jwt.public-key-file", TestTokens::publicKeyFile);
+        registry.add("app.security.service-token.signing-key-file", TestTokens::privateKeyFile);
         registry.add("wms.outbox.enabled", () -> "false");
         registry.add("spring.kafka.listener.auto-startup", () -> "false");
     }

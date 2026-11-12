@@ -12,6 +12,8 @@ interface Props {
   item: PickingItem;
   /** false: задание завершено, ввод закрыт. */
   editable: boolean;
+  /** Задание активно, но работник его ещё не принял: сначала «Принять задание». */
+  awaitingAccept?: boolean;
 }
 
 interface FormValues {
@@ -20,7 +22,7 @@ interface FormValues {
 }
 
 /** Одна строка сбора: крупная секция, товар, количество и кнопка «Собрано». */
-export default function PickRowCard({ taskId, item, editable }: Props) {
+export default function PickRowCard({ taskId, item, editable, awaitingAccept }: Props) {
   const [form] = Form.useForm<FormValues>();
   const queryClient = useQueryClient();
   const [error, setError] = useState<unknown>(null);
@@ -111,7 +113,7 @@ export default function PickRowCard({ taskId, item, editable }: Props) {
           </Form>
         </>
       ) : (
-        <Typography.Text type="secondary">Задание завершено</Typography.Text>
+        <Typography.Text type="secondary">{awaitingAccept ? 'Сначала примите задание' : 'Задание завершено'}</Typography.Text>
       )}
     </Card>
   );

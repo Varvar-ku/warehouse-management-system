@@ -26,6 +26,7 @@ public class AuthService {
     private final TokenService tokenService;
     private final LoginThrottleService throttle;
     private final AuthAudit audit;
+    private final RefreshTokenService refreshTokens;
 
     /** Хэш для «холостой» проверки, когда логин не найден (выравнивает время ответа). */
     private String dummyHash;
@@ -36,11 +37,17 @@ public class AuthService {
     }
 
     /**
+     * Результат входа или обновления: тело ответа (access-токен и пользователь) и refresh-токен для cookie.
+     * refresh == null при параллельном обновлении в льготном окне: новый токен браузер уже получил.
+     */
+    public record LoginSession(TokenResponse response, RefreshTokenService.Issued refresh) {}
+
+    /**
      * noRollbackFor: счётчик неудачных попыток должен сохраниться, даже когда метод
      * завершается ошибкой 401.
      */
     @Transactional(noRollbackFor = ApiException.class)
-    public TokenResponse login(LoginRequest req, String clientIp) {
+    public LoginSession login(LoginRequest req, String clientIp) {
         String login = req.login().trim().toLowerCase(Locale.ROOT);
         LoginThrottleService.Keys keys = throttle.keys(login, clientIp);
         log.debug("Попытка входа с адреса {}", clientIp); // логин и пароль не логируем
@@ -76,8 +83,35 @@ public class AuthService {
         }
         throttle.recordSuccess(keys);
         audit.record("auth.login_succeeded", "USER", user.getId(), user.getId(), "clientIp", clientIp);
+        return session(user, refreshTokens.startSession(user.getId()));
+    }
+
+    /**
+     * P1-8: обмен refresh-токена на новый access-токен (и новый refresh-токен). Отключённый пользователь теряет
+     * все сессии. noRollbackFor: отзыв сессий должен сохраниться, несмотря на 401.
+     */
+    @Transactional(noRollbackFor = ApiException.class)
+    public LoginSession refresh(String rawRefreshToken) {
+        RefreshTokenService.Rotation rotation = refreshTokens.rotate(rawRefreshToken);
+        User user = userRepository.findWithRolesById(rotation.userId()).filter(User::isActive).orElse(null);
+        if (user == null) {
+            refreshTokens.revokeAllForUser(rotation.userId(), "ACCOUNT_DISABLED");
+            throw RefreshTokenService.invalid();
+        }
+        return session(user, rotation.issued());
+    }
+
+    /** P1-8: выход. Отзывает сессию, которой принадлежит refresh-токен; без токена ничего не делает. */
+    @Transactional
+    public void logout(String rawRefreshToken) {
+        refreshTokens.logout(rawRefreshToken);
+    }
+
+    private LoginSession session(User user, RefreshTokenService.Issued refresh) {
         TokenService.IssuedToken token = tokenService.issue(user);
-        return new TokenResponse(token.value(), "Bearer", token.expiresInSeconds(), UserService.toResponse(user));
+        TokenResponse response = new TokenResponse(token.value(), "Bearer", token.expiresInSeconds(),
+                UserService.toResponse(user));
+        return new LoginSession(response, refresh);
     }
 
     /**

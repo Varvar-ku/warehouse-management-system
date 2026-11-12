@@ -39,19 +39,21 @@ class LoginThrottleTest {
     }
 
     @Test
-    void forwardedForIsUsedOnlyFromLoopback_andLastEntryWins() {
+    void clientIpHeaderIsUsedOnlyFromLoopback_andForwardedForIsIgnored() {
         MockHttpServletRequest fromGateway = new MockHttpServletRequest();
         fromGateway.setRemoteAddr("127.0.0.1");
-        fromGateway.addHeader("X-Forwarded-For", "9.9.9.9, 198.51.100.7"); // первый подставил клиент, второй дописал gateway
+        fromGateway.addHeader(ClientIp.HEADER, "198.51.100.7"); // ставит только gateway
+        fromGateway.addHeader("X-Forwarded-For", "9.9.9.9");
         assertThat(ClientIp.resolve(fromGateway)).isEqualTo("198.51.100.7");
 
         MockHttpServletRequest direct = new MockHttpServletRequest();
         direct.setRemoteAddr("203.0.113.5");
-        direct.addHeader("X-Forwarded-For", "9.9.9.9");
+        direct.addHeader(ClientIp.HEADER, "9.9.9.9");
         assertThat(ClientIp.resolve(direct)).isEqualTo("203.0.113.5");
 
         MockHttpServletRequest noHeader = new MockHttpServletRequest();
         noHeader.setRemoteAddr("127.0.0.1");
+        noHeader.addHeader("X-Forwarded-For", "9.9.9.9");
         assertThat(ClientIp.resolve(noHeader)).isEqualTo("127.0.0.1");
     }
 }

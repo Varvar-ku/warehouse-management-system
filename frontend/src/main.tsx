@@ -7,6 +7,7 @@ import ruRU from 'antd/locale/ru_RU';
 import dayjs from 'dayjs';
 import 'dayjs/locale/ru';
 import 'antd/dist/reset.css';
+import './focus.css';
 import App from './App';
 import { ApiError } from './api/errors';
 import { AuthProvider } from './auth/AuthContext';

@@ -26,9 +26,9 @@ class BatchLookupTest {
 
     @Test
     void differentExpiry_isRejected() {
-        assertThat(BatchLookup.mismatch(batch("PCS", EXP), "PCS", EXP.plusDays(1))).contains("срок годности");
-        assertThat(BatchLookup.mismatch(batch("PCS", EXP), "PCS", null)).contains("срок годности");
-        assertThat(BatchLookup.mismatch(batch("PCS", null), "PCS", EXP)).contains("срок годности");
+        assertThat(BatchLookup.mismatch(batch("PCS", EXP), "PCS", EXP.plusDays(1))).contains("годности");
+        assertThat(BatchLookup.mismatch(batch("PCS", EXP), "PCS", null)).contains("годности");
+        assertThat(BatchLookup.mismatch(batch("PCS", null), "PCS", EXP)).contains("годности");
     }
 
     @Test

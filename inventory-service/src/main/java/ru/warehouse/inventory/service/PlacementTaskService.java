@@ -75,6 +75,11 @@ public class PlacementTaskService {
         }
         SectionInfo placed = req.decision() == ResolveDecision.ACCEPT_ACTUAL
                 ? warehouseClient.section(postingService.placedSectionId(taskId, itemId)) : null;
+        if (placed != null) {
+            // та же проверка пригодности, что и при размещении работником, но на актуальных правилах секции;
+            // статус и «Нераспределено» проверяет StockPostingService внутри транзакции
+            requireSuitable(placed, postingService.placementItemForPlaced(taskId, itemId));
+        }
         return postingService.resolve(taskId, itemId, req, newTarget, placed, storekeeperId);
     }
 

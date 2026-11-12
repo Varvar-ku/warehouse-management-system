@@ -4,8 +4,8 @@ import java.util.List;
 
 /** Коды 401 и 403 по ролям для эндпоинтов inventory-service. */
 class RoleAccessIntegrationTest extends RoleAccessTestSupport {
-    private static final String WAREHOUSE = "00000000-0000-0000-0000-0000000000a1";
-    private static final String PRODUCT = "00000000-0000-0000-0000-0000000000b1";
+    private static final String WAREHOUSE = "\"00000000-0000-0000-0000-0000000000a1\"";
+    private static final String PRODUCT   = "\"00000000-0000-0000-0000-0000000000b1\"";
     private static final String SECTION = "\"" + ID + "\"";
 
     @Override

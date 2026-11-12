@@ -48,6 +48,14 @@ abstract class RoleAccessTestSupport extends IntegrationTestBase {
 
     abstract List<Endpoint> endpoints();
 
+    /**
+     * P1-10: whether this service accepts service tokens (app.security.accept-service-tokens).
+     * Only inventory-service does; everywhere else the SERVICE role must get 401 on every endpoint.
+     */
+    boolean acceptsServiceTokens() {
+        return true;
+    }
+
     /** Статус и начало тела ответа: код ошибки и пояснение показывают, почему получен именно этот статус. */
     record Result(int status, String body) {
         String shortBody() {
@@ -87,6 +95,13 @@ abstract class RoleAccessTestSupport extends IntegrationTestBase {
             for (String role : ALL_ROLES) {
                 Result result = call(e, tokenFor(role));
                 int status = result.status();
+                if (SERVICE.equals(role) && !acceptsServiceTokens()) {
+                    // P1-10: only inventory-service accepts service tokens, others reject them with 401 (ServiceTokenPolicy)
+                    if (status != 401) {
+                        violations.add("SERVICE token must be rejected with 401, got " + status + ": " + result.shortBody());
+                    }
+                    continue;
+                }
                 boolean allowed = e.allowed().contains(role);
                 if (allowed && (status == 401 || status == 403)) {
                     violations.add(role + " должна иметь доступ, получила " + status + ": " + result.shortBody());

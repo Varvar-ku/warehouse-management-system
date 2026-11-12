@@ -309,6 +309,8 @@ public class RequestService {
      * кладовщик на любом этапе до выдачи, при этом резерв освобождается в inventory-service.
      * Собранное не отменяется (ТЗ): из PICKED отмены нет, а из READY_FOR_ISSUE она разрешена только если
      * по заявке ничего не собрано (выдавать нечего, иначе заявка зависла бы с резервом навсегда).
+     * Если к моменту отмены что-то уже собрано (в открытых или завершённых заданиях), публикуется событие
+     * picking.return_required со списком строк: товар лежит вне секций и его нужно вернуть вручную.
      * S2: снятие резерва идёт между двумя короткими транзакциях; пока оно выполняется, по заявке не пройдёт
      * ни сбор, ни другие операции (аренда), поэтому недобор в отметках не устареет.
      */
@@ -351,14 +353,17 @@ public class RequestService {
         if (RESERVED_STATES.contains(r.getStatus())) {
             r.getItems().forEach(i -> i.setReservedQuantity(BigDecimal.ZERO));
             List<String> toReturn = new ArrayList<>(); // S3: уже собранное физически лежит вне секций
+            // Завершённые задания (COMPLETED) тоже учитываются: после завершения сборки с недостачей
+            // (PICKING_WITH_SHORTAGE) весь собранный товар лежит именно в них. Отклоняются только открытые.
             for (PickingTask t : pickingTaskRepository.findByRequestIdAndStatusIn(r.getId(),
-                    List.of(PickingTask.Status.NEW, PickingTask.Status.IN_PROGRESS))) {
+                    List.of(PickingTask.Status.NEW, PickingTask.Status.IN_PROGRESS, PickingTask.Status.COMPLETED))) {
                 for (PickingItem pi : t.getItems()) {
                     if (pi.getPickedQuantity() != null && pi.getPickedQuantity().signum() > 0) {
                         toReturn.add(pi.getSectionCode() + " / " + pi.getRequestItem().getProductSku() + ": "
                                 + pi.getPickedQuantity().stripTrailingZeros().toPlainString());
                     }
                 }
+                if (t.getStatus() == PickingTask.Status.COMPLETED) continue; // закрытое задание остаётся как есть
                 t.reject(); // открытое задание отклоняется, его работники снимаются
                 outbox.audit(SERVICE, "picking.task_rejected", "PICKING_TASK", t.getId(), actor.userId(), details(
                         "taskNumber", t.getNumber(),
@@ -370,6 +375,7 @@ public class RequestService {
                 log.warn("Заявка {} отменена после частичной сборки: нужно вернуть товар в секции: {}", r.getNumber(), toReturn);
                 outbox.audit(SERVICE, "picking.return_required", "REQUEST", r.getId(), actor.userId(), details(
                         "requestNumber", r.getNumber(),
+                        "status", r.getStatus().name(),
                         "rows", toReturn.size(),
                         "items", toReturn,
                         "reason", reason.trim()));

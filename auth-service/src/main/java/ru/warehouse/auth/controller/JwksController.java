@@ -1,0 +1,29 @@
+package ru.warehouse.auth.controller;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+import ru.warehouse.common.security.SigningKey;
+import java.time.Duration;
+
+/**
+ * P2-11: публичные ключи для проверки JWT (JWKS). Путь открыт без токена (app.security.public-paths), но не
+ * проброшен через gateway и доступен только на адресе сервиса (по умолчанию 127.0.0.1). Приватных данных нет.
+ */
+@RestController
+public class JwksController {
+    private final SigningKey key;
+
+    public JwksController(@Qualifier("userTokenSigningKey") SigningKey key) {
+        this.key = key;
+    }
+
+    @GetMapping(value = "/.well-known/jwks.json", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> jwks() {
+        return ResponseEntity.ok().cacheControl(CacheControl.maxAge(Duration.ofMinutes(5)).cachePublic())
+                .body(key.jwksJson());
+    }
+}

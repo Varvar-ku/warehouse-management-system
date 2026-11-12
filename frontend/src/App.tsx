@@ -5,6 +5,7 @@ import { useAuth } from './auth/AuthContext';
 import { RequireAuth, RequireRole } from './auth/guards';
 import { homePath } from './auth/roles';
 import AppLayout from './layout/AppLayout';
+import { useArrowNav } from './shared/useArrowNav';
 import LoginPage from './pages/LoginPage';
 import ProfilePage from './pages/ProfilePage';
 
@@ -49,6 +50,7 @@ function PageLoader() {
 }
 
 export default function App() {
+  useArrowNav(); // стрелки переводят фокус между кнопками на всех экранах
   return (
     <Suspense fallback={<PageLoader />}>
       <Routes>

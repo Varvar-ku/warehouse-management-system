@@ -16,4 +16,4 @@ if ($pwd -notmatch '^[A-Za-z0-9]+$') { throw "Password must be letters and digit
 
 "ALTER USER warehouse WITH PASSWORD '$pwd';" | docker exec -i warehouse-postgres psql -U warehouse -d postgres
 if ($LASTEXITCODE -ne 0) { throw "ALTER USER failed" }
-Write-Host "PostgreSQL password changed. Restart services with DB_PASSWORD from .env." -ForegroundColor Green
+Write-Host "Superuser password changed. Next: .\scripts\apply-db-roles.ps1 (service roles), then restart the services." -ForegroundColor Green

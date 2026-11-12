@@ -47,9 +47,16 @@ app:
   security:
     public-paths:
       - /api/v1/auth/login
+      - /api/v1/auth/refresh
+      - /api/v1/auth/logout
     jwt:
-      secret: ${JWT_SECRET:}     # без значения по умолчанию: секрет обязателен
+      jwks-uri: ${AUTH_JWKS_URI:${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json}   # P2-11: публичные ключи auth-service (RS256), общего секрета больше нет
+      audience: warehouse-api
       issuer: warehouse-auth
+  gateway:
+    # Адреса прокси, которым gateway доверяет X-Forwarded-For (например, nginx перед ним). Через запятую.
+    # Пусто: gateway видит клиента по адресу соединения. Не указывайте сюда адреса, до которых клиент может достучаться напрямую.
+    trusted-proxies: ${GATEWAY_TRUSTED_PROXIES:}
   cors:
     # Адреса фронтенда (React dev-сервер). Через запятую.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}

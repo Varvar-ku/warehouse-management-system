@@ -7,6 +7,23 @@ services:
       POSTGRES_USER: warehouse
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задайте POSTGRES_PASSWORD в infrastructure/.env}
       POSTGRES_DB: postgres
+      # P1-9: пароли ролей сервисов; по ним infrastructure/postgres/init/02-roles.sh создаёт <svc>_owner и <svc>_app
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:?задайте AUTH_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      AUTH_MIGRATION_PASSWORD: ${AUTH_MIGRATION_PASSWORD:?задайте AUTH_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?задайте CATALOG_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      CATALOG_MIGRATION_PASSWORD: ${CATALOG_MIGRATION_PASSWORD:?задайте CATALOG_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      WAREHOUSE_DB_PASSWORD: ${WAREHOUSE_DB_PASSWORD:?задайте WAREHOUSE_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      WAREHOUSE_MIGRATION_PASSWORD: ${WAREHOUSE_MIGRATION_PASSWORD:?задайте WAREHOUSE_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?задайте INVENTORY_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      INVENTORY_MIGRATION_PASSWORD: ${INVENTORY_MIGRATION_PASSWORD:?задайте INVENTORY_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      REQUEST_DB_PASSWORD: ${REQUEST_DB_PASSWORD:?задайте REQUEST_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      REQUEST_MIGRATION_PASSWORD: ${REQUEST_MIGRATION_PASSWORD:?задайте REQUEST_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?задайте NOTIFICATION_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      NOTIFICATION_MIGRATION_PASSWORD: ${NOTIFICATION_MIGRATION_PASSWORD:?задайте NOTIFICATION_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      AUDIT_DB_PASSWORD: ${AUDIT_DB_PASSWORD:?задайте AUDIT_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      AUDIT_MIGRATION_PASSWORD: ${AUDIT_MIGRATION_PASSWORD:?задайте AUDIT_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      REPORT_DB_PASSWORD: ${REPORT_DB_PASSWORD:?задайте REPORT_DB_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
+      REPORT_MIGRATION_PASSWORD: ${REPORT_MIGRATION_PASSWORD:?задайте REPORT_MIGRATION_PASSWORD в infrastructure/.env (scripts/generate-db-passwords.ps1)}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:

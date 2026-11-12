@@ -103,7 +103,7 @@ class SameBatchReceiptsIntegrationTest extends IntegrationTestBase {
 
         // сначала первая, затем вторая: порядок гонки не важен, важно, что вторая с другим сроком отклоняется
         posting.confirmPlacement(first.taskId(), first.itemId(), info, new BigDecimal("5"), null, UUID.randomUUID());
-        assertThatThrownBy(place(second, info, "5")::call).hasMessageContaining("срок годности");
+        assertThatThrownBy(place(second, info, "5")::call).hasMessageContaining("сроком годности");
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM batches WHERE product_id = ?", Integer.class, product)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT quantity FROM stock WHERE product_id = ?", BigDecimal.class, product))

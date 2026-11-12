@@ -23,7 +23,9 @@ export default function ConfirmModal({ open, title, description, okText, danger,
       open={open}
       okText={okText}
       cancelText="Назад"
-      okButtonProps={{ danger, loading }}
+      // Enter сразу подтверждает; для опасных действий автофокуса нет, чтобы случайный Enter ничего не отменил
+      okButtonProps={{ danger, loading, autoFocus: !danger }}
+      destroyOnClose
       cancelButtonProps={{ disabled: loading }}
       onOk={onConfirm}
       onCancel={onCancel}

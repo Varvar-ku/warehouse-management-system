@@ -7,8 +7,8 @@ spring:
     name: notification-service
   datasource:
     url: ${NOTIFICATION_DB_URL:jdbc:postgresql://localhost:5433/notification_db}
-    username: ${DB_USER:warehouse}
-    password: ${DB_PASSWORD}
+    username: ${NOTIFICATION_DB_USER:notification_app}
+    password: ${NOTIFICATION_DB_PASSWORD}
   jpa:
     open-in-view: false
     hibernate:
@@ -19,6 +19,10 @@ spring:
           time_zone: UTC   # как в остальных сервисах с JPA
   flyway:
     enabled: true
+    # P1-9: миграции выполняет владелец БД (notification_owner), приложение работает под ролью notification_app.
+    # Если переменные не заданы (например, в тестах), берутся учётные данные datasource.
+    user: ${NOTIFICATION_MIGRATION_USER:${spring.datasource.username}}
+    password: ${NOTIFICATION_MIGRATION_PASSWORD:${spring.datasource.password}}
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}}   # единое имя KAFKA_BOOTSTRAP, как в остальных сервисах
     consumer:
@@ -36,7 +40,8 @@ spring:
 app:
   security:
     jwt:
-      secret: ${JWT_SECRET:}
+      jwks-uri: ${AUTH_JWKS_URI:${AUTH_SERVICE_URL:http://localhost:8081}/.well-known/jwks.json}   # P2-11: публичные ключи auth-service (RS256), общего секрета больше нет
+      audience: warehouse-api
       issuer: warehouse-auth
 
   notification:
